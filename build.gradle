@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'com.fluxer'
+version = '2.0'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "spigotmc-repo"
+        url = "https://hub.spigotmc.org/nexus/content/repositories/snapshots/"
+    }
+    maven {
+        name = "sonatype"
+        url = "https://oss.sonatype.org/content/groups/public/"
+    }
+}
+
+dependencies {
+    compileOnly("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT") {
+        // its bungeecord-chat 1.8-SNAPSHOT dependency no longer exists in any repo
+        exclude group: 'net.md-5', module: 'bungeecord-chat'
+    }
+    compileOnly 'net.md-5:bungeecord-chat:1.16-R0.4' // chat components, from Maven Central
+    implementation 'com.neovisionaries:nv-websocket-client:2.14'
+    implementation 'com.google.code.gson:gson:2.8.9'
+    implementation 'com.squareup.okhttp3:okhttp:3.14.9'
+    compileOnly 'org.apache.logging.log4j:log4j-core:2.8.1'
+}
+
+def targetJavaVersion = 8
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+processResources {
+    def props = [version: version]
+    inputs.properties props
+    filteringCharset 'UTF-8'
+    filesMatching('plugin.yml') {
+        expand props
+    }
+}
+
+shadowJar {
+    relocate 'com.neovisionaries', 'com.fluxer.srv.lib.websocket'
+    relocate 'com.google.gson', 'com.fluxer.srv.lib.gson'
+}
+
+build.dependsOn shadowJar

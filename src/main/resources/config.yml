@@ -1,0 +1,102 @@
+# FluxerSRV Configuration File
+
+# Bot Token from Fluxer
+botToken: "Bot Token_Here"
+
+# Channel mappings
+channels:
+  global: "000000000000000000"
+  console: "000000000000000000"
+
+# Minecraft -> Fluxer
+formats:
+  chat: "**%player_name%**: %message%"
+  join: "```%player_name% joined the server!```"
+  quit: "```%player_name% left the server!```"
+  death: "```☠️ %death_message% ☠️```"
+  advancement: "```%player_name% has made the advancement [%advancement%]```"
+  goal: "```%player_name% has reached the goal [%advancement%]```"
+  challenge: "```%player_name% has completed the challenge [%advancement%]```"
+  serverStart: "# Server Started ✅"
+  serverStop: "# Server Stopped ❌"
+
+# Fluxer -> Minecraft
+# Color codes: &a, &l, etc., and hex colors as &#RRGGBB
+# Placeholders: %username%, %display_name%, %nickname%, %message%
+ingame:
+  format: "[&bFluxer&r] <%username%> %message%"
+  reply-format: "[&bFluxer&r] <%username%> &7(reply)&r %message%"
+  reply-preview-length: 50
+  # Let Fluxer users &-color codes in their messages.
+  allow-message-colors: true
+  # Clickable attachments and links show only their name (%name%): the file name for
+  # attachments, the [text] of a [text](url) link, or the shortened URL for a plain link.
+  # Leave a value empty to hide it (attachments only).
+  media-placeholder: "&b&n%name%&r"
+  file-placeholder: "&b&n%name%&r"
+  link-placeholder: "&b&n%name%&r"
+  # Plain links longer than this are cut with "..."
+  link-max-length: 40
+
+  mentions:
+    user-format: "&b@%name%"
+    role-format: "&b@%name%"
+    channel-format: "&b#%name%"
+    # Which name to show for mentioned users: username, display_name or nickname
+    # (nickname = their server nickname, falling back to display name)
+    name-source: "nickname"
+
+# Per-player chat webhooks
+# When enabled, in-game chat is posted to the global channel through a webhook, so each
+# message shows the player's own name and avatar instead of coming from the bot.
+webhooks:
+  enabled: false
+  # An existing webhook URL, used exactly as given, e.g.
+  # https://fluxer.com/api/webhooks/<id>/<token>
+  url: ""
+  name: " "
+  username-format: "%player_name%"
+  avatar-url: "https://heads.discordsrv.com/%player_name%/helm/256"
+  content-format: "%message%"
+  fallback-to-bot: true
+
+# Live player count shown as the bot's custom status on Fluxer
+status:
+  enabled: true
+  update-interval-seconds: 30
+  # Placeholders: %online%, %max%
+  format: "%online%/%max% players online"
+  # online, idle, dnd or invisible
+  presence: "online"
+
+# InteractiveChat Support
+interactivechat:
+  enabled: true
+  # Max characters of each details block (items, inventories, hover text)
+  max-details-length: 1900
+  item:
+    enabled: true
+    keyword: "[item]"
+    # %item% = name (and "x<amount>"), %player%
+    inline: "`[%item%]`"
+    # Used when the player isn't holding anything
+    empty-inline: "`[Nothing]`"
+  inventory:
+    enabled: true
+    keyword: "[inv]"
+    inline: "`[%player%'s Inventory]`"
+  enderchest:
+    enabled: true
+    keyword: "[ender]"
+    inline: "`[%player%'s Ender Chest]`"
+  custom:
+    - keyword: "[pos]"
+      replace: "`[%player_world%: %player_x% %player_y% %player_z%]`"
+  commands:
+    enabled: true
+    prefix: "mc!"
+
+# Turning this TRUE won't send messages without "!" before them to Fluxer.
+fluxer-global-only: false
+# Send player advancements (and challenges/goals) to the global channel
+announce-advancements: true
