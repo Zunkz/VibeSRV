@@ -167,6 +167,7 @@ public final class FluxerText {
         }
         String mediaFormat = plugin.getConfig().getString("ingame.media-placeholder", DEFAULT_LINK_FORMAT);
         String fileFormat = plugin.getConfig().getString("ingame.file-placeholder", DEFAULT_LINK_FORMAT);
+        boolean clickable = plugin.getConfig().getBoolean("ingame.clickable-media", true);
         StringBuilder out = new StringBuilder();
         for (JsonElement element : msg.getAsJsonArray("attachments")) {
             if (!element.isJsonObject()) {
@@ -187,7 +188,11 @@ public final class FluxerText {
             }
             if (url != null && isHttp(url)) {
                 String cleanUrl = stripTokens(url).replace(SECTION, "");
-                out.append(TOKEN_START).append(cleanUrl).append(TOKEN_SEP).append(display).append(TOKEN_END);
+                if (clickable) {
+                    out.append(TOKEN_START).append(cleanUrl).append(TOKEN_SEP).append(display).append(TOKEN_END);
+                } else {
+                    out.append(cleanUrl); // clickable-media: false -> plain, copyable URL
+                }
             } else {
                 out.append(display);
             }
@@ -448,6 +453,9 @@ public final class FluxerText {
         }
         if (!styled) {
             return name; // reply previews: plain text
+        }
+        if (!plugin.getConfig().getBoolean("ingame.clickable-links", true)) {
+            return url; // clickable-links: false -> the original URL as plain text
         }
         String format = plugin.getConfig().getString("ingame.link-placeholder", DEFAULT_LINK_FORMAT);
         if (format == null || format.isEmpty()) {

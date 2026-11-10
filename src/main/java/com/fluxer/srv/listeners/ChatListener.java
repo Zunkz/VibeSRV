@@ -57,12 +57,14 @@ public class ChatListener implements Listener {
 
         // InteractiveChat-style placeholders ([item], [inv], [ender], custom): sent as Fluxer markdown
         String details = "";
+        java.util.List<ChatPlaceholders.Embed> embeds = null;
         ChatPlaceholders placeholders = plugin.getChatPlaceholders();
         if (placeholders != null && placeholders.containsKeyword(rawMessage)) {
             ChatPlaceholders.Result result = placeholders.processSafely(event.getPlayer(), rawMessage);
             if (result != null) {
                 rawMessage = result.message;
                 details = result.details;
+                embeds = result.embeds;
             }
         }
         if (!details.isEmpty()) {
@@ -72,13 +74,16 @@ public class ChatListener implements Listener {
         final String chatText = rawMessage;
         final String playerName = event.getPlayer().getName();
         final String playerUuid = event.getPlayer().getUniqueId().toString();
+        final java.util.List<ChatPlaceholders.Embed> chatEmbeds = embeds;
 
         String format = plugin.getConfig().getString("formats.chat", "**%player_name%**: %message%");
-        String message = format
-                .replace("%player_name%", event.getPlayer().getName())
-                .replace("%message%", rawMessage);
+        // If the message was only [item]/[inv]/[ender], the embed's title already names the player
+        final String message = rawMessage.trim().isEmpty() && embeds != null && !embeds.isEmpty()
+                ? ""
+                : format.replace("%player_name%", event.getPlayer().getName())
+                        .replace("%message%", rawMessage);
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin,
-                () -> plugin.sendPlayerChat(playerName, playerUuid, chatText, message));
+                () -> plugin.sendPlayerChat(playerName, playerUuid, chatText, message, chatEmbeds));
     }
 }

@@ -1,7 +1,7 @@
 # FluxerSRV Configuration File
 
 # Bot Token from Fluxer
-botToken: "Bot Token_Here"
+botToken: ""
 
 # Channel mappings
 channels:
@@ -11,14 +11,28 @@ channels:
 # Minecraft -> Fluxer
 formats:
   chat: "**%player_name%**: %message%"
-  join: "```%player_name% joined the server!```"
-  quit: "```%player_name% left the server!```"
-  death: "```☠️ %death_message% ☠️```"
-  advancement: "```%player_name% has made the advancement [%advancement%]```"
-  goal: "```%player_name% has reached the goal [%advancement%]```"
-  challenge: "```%player_name% has completed the challenge [%advancement%]```"
-  serverStart: "# Server Started ✅"
-  serverStop: "# Server Stopped ❌"
+  join: "**%player_name%** joined the server!"
+  quit: "**%player_name%** left the server!"
+  death: "☠️ %death_message%"
+  advancement: "🏆 **%player_name%** has made the advancement **%advancement%**"
+  goal: "🎯 **%player_name%** has reached the goal **%advancement%**"
+  challenge: "🏅 **%player_name%** has completed the challenge **%advancement%**"
+  serverStart: "```Server Started ✅```"
+  serverStop: "```Server Stopped ❌```"
+
+# Join / quit / death / advancement / goal / challenge messages are sent as embeds.
+# The formats above (formats.join, formats.quit, formats.advancement, ...) become the embed text.
+embeds:
+  # false = send these as plain messages instead of embeds
+  enabled: true
+  # Side-bar color of each embed: "#RRGGBB" hex (or a decimal number)
+  colors:
+    join: "#57F287"
+    quit: "#ED4245"
+    advancement: "#FEE75C"
+    goal: "#3498DB"
+    challenge: "#9B59B6"
+    death: "#2F3136"
 
 # Fluxer -> Minecraft
 # Color codes: &a, &l, etc., and hex colors as &#RRGGBB
@@ -29,6 +43,12 @@ ingame:
   reply-preview-length: 50
   # Let Fluxer users &-color codes in their messages.
   allow-message-colors: true
+  # Make links in Fluxer messages clickable in Minecraft chat.
+  # false = the full URL is shown as plain text instead (the placeholders below are ignored).
+  clickable-links: true
+  # Make attachments (images, gifs, videos and files) clickable.
+  # false = the attachment's full URL is shown as plain text instead.
+  clickable-media: true
   # Clickable attachments and links show only their name (%name%): the file name for
   # attachments, the [text] of a [text](url) link, or the shortened URL for a plain link.
   # Leave a value empty to hide it (attachments only).
@@ -39,9 +59,9 @@ ingame:
   link-max-length: 40
 
   mentions:
-    user-format: "&b@%name%"
-    role-format: "&b@%name%"
-    channel-format: "&b#%name%"
+    user-format: "&b@%name%&r"
+    role-format: "&b@%name%&r"
+    channel-format: "&b#%name%&r"
     # Which name to show for mentioned users: username, display_name or nickname
     # (nickname = their server nickname, falling back to display name)
     name-source: "nickname"
@@ -50,7 +70,7 @@ ingame:
 # When enabled, in-game chat is posted to the global channel through a webhook, so each
 # message shows the player's own name and avatar instead of coming from the bot.
 webhooks:
-  enabled: false
+  enabled: true
   # An existing webhook URL, used exactly as given, e.g.
   # https://fluxer.com/api/webhooks/<id>/<token>
   url: ""
@@ -81,14 +101,45 @@ interactivechat:
     inline: "`[%item%]`"
     # Used when the player isn't holding anything
     empty-inline: "`[Nothing]`"
+    # Show [item] (and mc!item) as an embed instead of an inline tag + code block.
+    # With embed.enabled the message keeps only the player's own text (the inline tag is not sent).
+    embed:
+      enabled: true
+      # Side-bar color: "#RRGGBB"
+      color: "#3498DB"
+      # Placeholders: %player%, %item%
+      title: "%player%'s Item"
   inventory:
     enabled: true
     keyword: "[inv]"
     inline: "`[%player%'s Inventory]`"
+    # Show [inv] (and mc!inv) as an embed instead of an inline tag + code block.
+    embed:
+      enabled: true
+      # Show the player's head as the embed's icon (same URL as webhooks.avatar-url).
+      # Every embed has this option; it is on by default only for the inventory.
+      icon: true
+      # Side-bar color: "#RRGGBB"
+      color: "#5865F2"
+      # Placeholders: %player%
+      title: "%player%'s Inventory"
   enderchest:
     enabled: true
     keyword: "[ender]"
     inline: "`[%player%'s Ender Chest]`"
+    # Same as inventory.embed, for [ender] (and mc!ender)
+    embed:
+      enabled: true
+      color: "#8E44AD"
+      title: "%player%'s Ender Chest"
+  # What is inside a shulker box you share with [item] (or mc!item).
+  # With embed.enabled the contents are shown in an embed (no icon, no inline tag).
+  shulker:
+    embed:
+      enabled: true
+      color: "#CB4DCB"
+      # Placeholders: %player%, %item% (the shulker box's name)
+      title: "%player%'s %item%"
   custom:
     - keyword: "[pos]"
       replace: "`[%player_world%: %player_x% %player_y% %player_z%]`"

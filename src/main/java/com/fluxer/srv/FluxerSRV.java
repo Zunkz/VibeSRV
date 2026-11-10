@@ -337,7 +337,34 @@ public class FluxerSRV extends JavaPlugin {
      * when enabled, otherwise through the bot using botMessage. Call from an async thread.
      */
     public void sendPlayerChat(String playerName, String playerUuid, String rawMessage, String botMessage) {
+        sendPlayerChat(playerName, playerUuid, rawMessage, botMessage, null);
+    }
+
+    /** The player's head icon: the same URL (webhooks.avatar-url) the webhook uses as their avatar. */
+    public String playerAvatarUrl(String playerName, String playerUuid) {
+        return getConfig()
+                .getString("webhooks.avatar-url", "https://heads.discordsrv.com/%player_name%/helm/256")
+                .replace("%player_name%", playerName)
+                .replace("%player_uuid%", playerUuid);
+    }
+
+    /** Embeds with the title as the author line, plus the player's head as its icon when the embed asks for it. */
+    public java.util.List<com.google.gson.JsonObject> buildEmbeds(String playerName, String playerUuid,
+                                                                  java.util.List<ChatPlaceholders.Embed> embeds) {
+        String icon = playerAvatarUrl(playerName, playerUuid);
+        java.util.List<com.google.gson.JsonObject> out = new java.util.ArrayList<>();
+        for (ChatPlaceholders.Embed embed : embeds) {
+            out.add(FluxerRestApi.authorEmbed(embed.title, embed.icon ? icon : null, embed.body, embed.color));
+        }
+        return out;
+    }
+
+    /** As above; the embeds (if any) are posted in the same message. */
+    public void sendPlayerChat(String playerName, String playerUuid, String rawMessage, String botMessage,
+                               java.util.List<ChatPlaceholders.Embed> embedList) {
         FluxerRestApi api = fluxerClient.getRestApi();
+        java.util.List<com.google.gson.JsonObject> embeds = embedList == null || embedList.isEmpty()
+                ? null : buildEmbeds(playerName, playerUuid, embedList);
         boolean fallback = getConfig().getBoolean("webhooks.fallback-to-bot", true);
 
         if (getConfig().getBoolean("webhooks.enabled", false)) {
@@ -347,14 +374,11 @@ public class FluxerSRV extends JavaPlugin {
                     String username = getConfig().getString("webhooks.username-format", "%player_name%")
                             .replace("%player_name%", playerName)
                             .replace("%player_uuid%", playerUuid);
-                    String avatar = getConfig()
-                            .getString("webhooks.avatar-url", "https://heads.discordsrv.com/%player_name%/helm/256")
-                            .replace("%player_name%", playerName)
-                            .replace("%player_uuid%", playerUuid);
+                    String avatar = playerAvatarUrl(playerName, playerUuid);
                     String content = getConfig().getString("webhooks.content-format", "%message%")
                             .replace("%player_name%", playerName)
                             .replace("%message%", stripMassMentions(rawMessage));
-                    api.executeWebhook(hook, content, username, avatar);
+                    api.executeWebhook(hook, content, username, avatar, embeds);
                     return;
                 } catch (Exception e) {
                     getLogger().warning("Failed to send chat via webhook: " + e.getMessage());
@@ -366,7 +390,11 @@ public class FluxerSRV extends JavaPlugin {
         }
 
         try {
-            api.sendMessage(mainChannelId, botMessage);
+            if (embeds != null) {
+                api.sendMessage(mainChannelId, botMessage, embeds);
+            } else {
+                api.sendMessage(mainChannelId, botMessage);
+            }
         } catch (Exception e) {
             getLogger().warning("Failed to send chat message to Fluxer: " + e.getMessage());
         }

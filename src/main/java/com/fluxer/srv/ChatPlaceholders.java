@@ -45,10 +45,28 @@ public final class ChatPlaceholders {
     public static final class Result {
         public final String message;
         public final String details;
+        /** Embeds ([item], [inv], [ender], shulker contents) to post with the message; empty if none. */
+        public final List<Embed> embeds;
 
-        Result(String message, String details) {
+        Result(String message, String details, List<Embed> embeds) {
             this.message = message;
             this.details = details;
+            this.embeds = embeds;
+        }
+    }
+
+    /** One embed: title (the author line), body (markdown text), side-bar color and whether it shows the player's head icon. */
+    public static final class Embed {
+        public final String title;
+        public final String body;
+        public final int color;
+        public final boolean icon;
+
+        Embed(String title, String body, int color, boolean icon) {
+            this.title = title;
+            this.body = body;
+            this.color = color;
+            this.icon = icon;
         }
     }
 
@@ -164,6 +182,7 @@ public final class ChatPlaceholders {
     public Result process(Player player, String text) {
         String out = text;
         List<String> blocks = new ArrayList<>();
+        List<Embed> embeds = new ArrayList<>();
         int max = maxLength();
 
         if (sectionEnabled("item") && contains(out, keyword("item", "[item]"))
@@ -176,25 +195,45 @@ public final class ChatPlaceholders {
                 inline = cfg().getString("interactivechat.item.inline", "`[%item%]`")
                         .replace("%item%", itemTag(held))
                         .replace("%player%", safe(player.getName()));
-                blocks.add(codeBlock(max, itemLines(held)));
+                if (shulkerAsEmbed(held)) {
+                    inline = ""; // the embed replaces the tag and the details block
+                    embeds.add(shulkerEmbed(player, held, max));
+                } else if (embedEnabled("item")) {
+                    inline = ""; // the embed replaces the tag and the details block
+                    embeds.add(itemEmbed(player, held, max));
+                } else {
+                    blocks.add(codeBlock(max, itemLines(held, true)));
+                }
             }
             out = replaceIgnoreCase(out, keyword("item", "[item]"), inline);
         }
 
         if (sectionEnabled("inventory") && contains(out, keyword("inventory", "[inv]"))
                 && allowed(player, "interactivechat.module.inventory", null)) {
-            String inline = cfg().getString("interactivechat.inventory.inline", "`[%player%'s Inventory]`")
-                    .replace("%player%", safe(player.getName()));
-            out = replaceIgnoreCase(out, keyword("inventory", "[inv]"), inline);
-            blocks.add(codeBlock(max, inventoryLines(player)));
+            if (embedEnabled("inventory")) {
+                // the embed replaces the inline tag and the details block
+                out = replaceIgnoreCase(out, keyword("inventory", "[inv]"), "");
+                embeds.add(inventoryEmbed(player, max));
+            } else {
+                String inline = cfg().getString("interactivechat.inventory.inline", "`[%player%'s Inventory]`")
+                        .replace("%player%", safe(player.getName()));
+                out = replaceIgnoreCase(out, keyword("inventory", "[inv]"), inline);
+                blocks.add(codeBlock(max, inventoryLines(player)));
+            }
         }
 
         if (sectionEnabled("enderchest") && contains(out, keyword("enderchest", "[ender]"))
                 && allowed(player, "interactivechat.module.enderchest", null)) {
-            String inline = cfg().getString("interactivechat.enderchest.inline", "`[%player%'s Ender Chest]`")
-                    .replace("%player%", safe(player.getName()));
-            out = replaceIgnoreCase(out, keyword("enderchest", "[ender]"), inline);
-            blocks.add(codeBlock(max, enderLines(player)));
+            if (embedEnabled("enderchest")) {
+                // the embed replaces the inline tag and the details block
+                out = replaceIgnoreCase(out, keyword("enderchest", "[ender]"), "");
+                embeds.add(enderEmbed(player, max));
+            } else {
+                String inline = cfg().getString("interactivechat.enderchest.inline", "`[%player%'s Ender Chest]`")
+                        .replace("%player%", safe(player.getName()));
+                out = replaceIgnoreCase(out, keyword("enderchest", "[ender]"), inline);
+                blocks.add(codeBlock(max, enderLines(player)));
+            }
         }
 
         for (Map<?, ?> custom : cfg().getMapList("interactivechat.custom")) {
@@ -242,7 +281,103 @@ public final class ChatPlaceholders {
             }
             details.append(block);
         }
-        return new Result(out, details.toString());
+        if (!embeds.isEmpty()) {
+            out = out.replaceAll(" {2,}", " ").trim(); // placeholders shown as embeds leave no text behind
+        }
+        return new Result(out, details.toString(), embeds);
+    }
+
+    // ---- embeds ([inv], [ender], shulker box contents) ----
+
+    /** interactivechat.<section>.embed.enabled (on by default): section is item, inventory, enderchest or shulker. */
+    private boolean embedEnabled(String section) {
+        return cfg().getBoolean("interactivechat." + section + ".embed.enabled", true);
+    }
+
+    private Embed makeEmbed(String section, String defaultTitle, Player player, String itemName,
+                            List<String> bodyLines, boolean headings, int max) {
+        String title = cfg().getString("interactivechat." + section + ".embed.title", defaultTitle)
+                .replace("%player%", safe(player.getName()))
+                .replace("%item%", safe(itemName == null ? "" : itemName));
+        int color = EventEmbeds.parseColor(cfg().get("interactivechat." + section + ".embed.color"), 0x5865F2);
+        // the player's head icon: on for the inventory embed by default, off for the others
+        boolean icon = cfg().getBoolean("interactivechat." + section + ".embed.icon", section.equals("inventory"));
+        return new Embed(title, embedText(max, bodyLines, headings), color, icon);
+    }
+
+    /** Lines without the first one, which is the "X's Inventory" heading the embed title replaces. */
+    private static List<String> withoutHeading(List<String> lines) {
+        return new ArrayList<>(lines.subList(1, lines.size()));
+    }
+
+    private Embed inventoryEmbed(Player player, int max) {
+        return makeEmbed("inventory", "%player%'s Inventory", player, null,
+                withoutHeading(inventoryLines(player)), true, max);
+    }
+
+    private Embed enderEmbed(Player player, int max) {
+        return makeEmbed("enderchest", "%player%'s Ender Chest", player, null,
+                withoutHeading(enderLines(player)), false, max);
+    }
+
+    /** A held item (any item, including bundles) with its enchantments, lore, durability and contents. */
+    private Embed itemEmbed(Player player, ItemStack item, int max) {
+        return makeEmbed("item", "%player%'s Item", player, itemName(item),
+                itemLines(item, true), true, max);
+    }
+
+    private Embed shulkerEmbed(Player player, ItemStack box, int max) {
+        return makeEmbed("shulker", "%player%'s %item%", player, itemName(box),
+                contentLines(containedItems(box), ""), false, max);
+    }
+
+    /**
+     * Embed body as normal text (no code block). Markdown drops leading spaces, so the layout is
+     * rebuilt: unindented lines become "## " headings (when {@code headings}), the rest bullets.
+     */
+    private static String embedText(int max, List<String> lines, boolean headings) {
+        StringBuilder body = new StringBuilder();
+        for (String line : lines) {
+            int indent = 0;
+            while (indent < line.length() && line.charAt(indent) == ' ') {
+                indent++;
+            }
+            String text = line.substring(indent);
+            if (text.startsWith("- ")) {
+                text = text.substring(2);
+            }
+            text = text.replace("\\", "\\\\").replace("*", "\\*").replace("_", "\\_")
+                    .replace("~", "\\~").replace("|", "\\|");
+            StringBuilder out = new StringBuilder();
+            if (headings && indent == 0) {
+                out.append("## ").append(text);
+            } else {
+                int level = Math.max(0, (indent - 2) / 2);
+                for (int i = 0; i < level; i++) {
+                    out.append('\u2003').append('\u2003');
+                }
+                out.append("\u2022 ").append(text);
+            }
+            if (body.length() + out.length() + 1 > max) {
+                body.append("... (truncated)");
+                break;
+            }
+            body.append(out).append('\n');
+        }
+        String text = body.toString();
+        while (text.endsWith("\n")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text;
+    }
+
+    private static boolean isShulker(ItemStack item) {
+        return item.getType().name().endsWith("SHULKER_BOX");
+    }
+
+    /** True when this held item is a shulker box with contents and the shulker embed is switched on. */
+    private boolean shulkerAsEmbed(ItemStack item) {
+        return embedEnabled("shulker") && isShulker(item) && !containedItems(item).isEmpty();
     }
 
     private int maxLength() {
@@ -296,6 +431,40 @@ public final class ChatPlaceholders {
         String argument = parts.length > 1 ? parts[1] : "";
 
         plugin.getServer().getScheduler().runTask(plugin, () -> {
+            Player target = argument.isEmpty() ? null : plugin.getServer().getPlayerExact(argument);
+            if (target != null) {
+                int max = maxLength();
+                List<Embed> embeds = new ArrayList<>();
+                String text = "";
+                if (command.equals("inv") && embedEnabled("inventory")) {
+                    embeds.add(inventoryEmbed(target, max));
+                } else if (command.equals("ender") && embedEnabled("enderchest")) {
+                    embeds.add(enderEmbed(target, max));
+                } else if (command.equals("item")) {
+                    ItemStack held = target.getItemInHand();
+                    if (!isEmpty(held)) {
+                        if (shulkerAsEmbed(held)) {
+                            embeds.add(shulkerEmbed(target, held, max));
+                        } else if (embedEnabled("item")) {
+                            embeds.add(itemEmbed(target, held, max));
+                        }
+                    }
+                }
+                if (!embeds.isEmpty()) {
+                    final String embedText = text;
+                    final String targetName = target.getName();
+                    final String targetUuid = target.getUniqueId().toString();
+                    plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+                        try {
+                            plugin.getFluxerClient().getRestApi().sendMessage(channelId, embedText,
+                                    plugin.buildEmbeds(targetName, targetUuid, embeds));
+                        } catch (Exception e) {
+                            plugin.getLogger().warning("Failed to send command reply to Fluxer: " + e.getMessage());
+                        }
+                    });
+                    return;
+                }
+            }
             String reply = commandReply(prefix, command, argument);
             plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                 try {
@@ -340,7 +509,7 @@ public final class ChatPlaceholders {
             if (isEmpty(held)) {
                 return "**" + safe(target.getName()) + "** isn't holding anything.";
             }
-            return codeBlock(max, itemLines(held));
+            return codeBlock(max, itemLines(held, true));
         }
         if (command.equals("inv")) {
             return codeBlock(max, inventoryLines(target));
@@ -403,7 +572,7 @@ public final class ChatPlaceholders {
         if (hasCustomName(item)) {
             return safe(item.getItemMeta().getDisplayName());
         }
-        return pretty(item.getType().name());
+        return ItemNames.baseName(item);
     }
 
     /** "Diamond Sword" or "Cobblestone x64". */
@@ -569,22 +738,22 @@ public final class ChatPlaceholders {
     }
 
     /** Full tooltip-style lines for one item. */
-    private static List<String> itemLines(ItemStack item) {
+    private static List<String> itemLines(ItemStack item, boolean withContents) {
         try {
-            return itemLinesUnsafe(item);
+            return itemLinesUnsafe(item, withContents);
         } catch (Throwable t) {
             List<String> lines = new ArrayList<>();
             lines.add(itemTag(item));
-            lines.add("  Type: " + pretty(item.getType().name()));
+            lines.add("  Type: " + ItemNames.baseName(item));
             return lines;
         }
     }
 
-    private static List<String> itemLinesUnsafe(ItemStack item) {
+    private static List<String> itemLinesUnsafe(ItemStack item, boolean withContents) {
         List<String> lines = new ArrayList<>();
         lines.add(itemTag(item));
         if (hasCustomName(item)) {
-            lines.add("  Type: " + pretty(item.getType().name()));
+            lines.add("  Type: " + ItemNames.baseName(item));
         }
         for (String enchantment : enchantments(item)) {
             lines.add("  " + enchantment);
@@ -603,7 +772,7 @@ public final class ChatPlaceholders {
         if (maxDurability > 0 && used > 0) {
             lines.add("  Durability: " + Math.max(0, maxDurability - used) + "/" + maxDurability);
         }
-        List<ItemStack> contents = containedItems(item);
+        List<ItemStack> contents = withContents ? containedItems(item) : new ArrayList<ItemStack>();
         if (!contents.isEmpty()) {
             lines.add("  Contents:");
             lines.addAll(contentLines(contents, "    "));

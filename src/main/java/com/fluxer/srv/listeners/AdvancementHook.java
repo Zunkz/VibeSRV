@@ -1,5 +1,7 @@
 package com.fluxer.srv.listeners;
 
+import com.fluxer.srv.EventEmbeds;
+import com.fluxer.srv.AdvancementNames;
 import com.fluxer.srv.FluxerSRV;
 import org.bukkit.ChatColor;
 import org.bukkit.event.Event;
@@ -19,11 +21,11 @@ import java.lang.reflect.Method;
 public final class AdvancementHook {
 
     private static final String DEFAULT_ADVANCEMENT =
-            "```\uD83C\uDFC6 %player_name% has made the advancement [%advancement%]```";
+            "\uD83C\uDFC6 **%player_name%** has made the advancement **%advancement%**";
     private static final String DEFAULT_GOAL =
-            "```\uD83C\uDFAF %player_name% has reached the goal [%advancement%]```";
+            "\uD83C\uDFAF **%player_name%** has reached the goal **%advancement%**";
     private static final String DEFAULT_CHALLENGE =
-            "```\uD83C\uDFC5 %player_name% has completed the challenge [%advancement%]```";
+            "\uD83C\uDFC5 **%player_name%** has completed the challenge **%advancement%**";
 
     private AdvancementHook() {
     }
@@ -98,6 +100,15 @@ public final class AdvancementHook {
             return;
         }
 
+        AdvancementNames.Info known = AdvancementNames.lookup(path);
+        if (known != null) {
+            if (AdvancementNames.looksUntranslated(title)) {
+                title = known.title;
+            }
+            if (getDisplay == null) {
+                type = known.type; // old APIs don't expose the frame type
+            }
+        }
         if (title == null || title.trim().isEmpty()) {
             title = titleFromKey(path);
         }
@@ -144,18 +155,26 @@ public final class AdvancementHook {
 
         String configKey;
         String fallback;
+        String colorKey;
+        int defaultColor;
         switch (type == null ? "TASK" : type.toUpperCase()) {
             case "GOAL":
                 configKey = "formats.goal";
                 fallback = DEFAULT_GOAL;
+                colorKey = "goal";
+                defaultColor = 0x3498DB;
                 break;
             case "CHALLENGE":
                 configKey = "formats.challenge";
                 fallback = DEFAULT_CHALLENGE;
+                colorKey = "challenge";
+                defaultColor = 0x9B59B6;
                 break;
             default:
                 configKey = "formats.advancement";
                 fallback = DEFAULT_ADVANCEMENT;
+                colorKey = "advancement";
+                defaultColor = 0xFEE75C;
                 break;
         }
 
@@ -166,7 +185,7 @@ public final class AdvancementHook {
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                plugin.getFluxerClient().getRestApi().sendMessage(mainChannelId, message);
+                EventEmbeds.send(plugin, mainChannelId, message, colorKey, defaultColor);
             } catch (Exception e) {
                 plugin.getLogger().warning("Failed to send advancement to Fluxer: " + e.getMessage());
             }

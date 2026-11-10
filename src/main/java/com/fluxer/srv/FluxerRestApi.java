@@ -50,6 +50,53 @@ public class FluxerRestApi {
         sendMessage(channelId, content, false);
     }
 
+    /** Sends a message with optional text content and prebuilt embeds. */
+    public void sendMessage(String channelId, String content, java.util.List<JsonObject> embeds)
+            throws IOException {
+        JsonObject body = new JsonObject();
+        if (content != null && !content.isEmpty()) {
+            body.addProperty("content", content);
+        }
+        body.add("embeds", embedArray(embeds));
+        post("/channels/" + channelId + "/messages", body);
+    }
+
+    private static com.google.gson.JsonArray embedArray(java.util.List<JsonObject> embeds) {
+        com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+        for (JsonObject embed : embeds) {
+            array.add(embed);
+        }
+        return array;
+    }
+
+    /** An embed with an author line (name + small icon), a description and a side-bar color. */
+    public static JsonObject authorEmbed(String name, String iconUrl, String description, int color) {
+        JsonObject embed = new JsonObject();
+        JsonObject author = new JsonObject();
+        author.addProperty("name", name);
+        if (iconUrl != null && !iconUrl.isEmpty()) {
+            author.addProperty("icon_url", iconUrl);
+        }
+        embed.add("author", author);
+        embed.addProperty("description", description);
+        embed.addProperty("color", color);
+        return embed;
+    }
+
+    /** Sends a message containing a single embed (description text with a colored side bar). */
+    public void sendEmbed(String channelId, String description, int color) throws IOException {
+        JsonObject embed = new JsonObject();
+        embed.addProperty("description", description);
+        embed.addProperty("color", color);
+
+        com.google.gson.JsonArray embeds = new com.google.gson.JsonArray();
+        embeds.add(embed);
+
+        JsonObject body = new JsonObject();
+        body.add("embeds", embeds);
+        post("/channels/" + channelId + "/messages", body);
+    }
+
     /**
      * Finds a webhook with the given name in the channel, or creates one.
      * Requires the bot to have the "Manage Webhooks" permission.
@@ -98,8 +145,20 @@ public class FluxerRestApi {
      */
     public void executeWebhook(Webhook webhook, String content, String username, String avatarUrl)
             throws IOException {
+        executeWebhook(webhook, content, username, avatarUrl, null);
+    }
+
+    /** Same, with optional embeds posted in the same message. */
+    public void executeWebhook(Webhook webhook, String content, String username, String avatarUrl,
+                               java.util.List<JsonObject> embeds) throws IOException {
         JsonObject body = new JsonObject();
-        body.addProperty("content", content);
+        boolean hasEmbeds = embeds != null && !embeds.isEmpty();
+        if (!hasEmbeds || (content != null && !content.trim().isEmpty())) {
+            body.addProperty("content", content);
+        }
+        if (hasEmbeds) {
+            body.add("embeds", embedArray(embeds));
+        }
         if (username != null && !username.isEmpty()) {
             body.addProperty("username", username);
         }

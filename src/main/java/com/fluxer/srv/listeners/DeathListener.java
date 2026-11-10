@@ -1,5 +1,6 @@
 package com.fluxer.srv.listeners;
 
+import com.fluxer.srv.EventEmbeds;
 import com.fluxer.srv.FluxerSRV;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -26,12 +27,12 @@ public class DeathListener implements Listener {
             return;
         }
 
-        String format = plugin.getConfig().getString("formats.death", "```\u2620\uFE0F %death_message%```");
+        String format = plugin.getConfig().getString("formats.death", "\u2620\uFE0F %death_message%");
         String message = format.replace("%death_message%", deathMessage);
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                plugin.getFluxerClient().getRestApi().sendMessage(mainChannelId, message);
+                EventEmbeds.send(plugin, mainChannelId, message, "death", 0x2F3136);
             } catch (Exception e) {
                 plugin.getLogger().warning("Failed to send death message to Fluxer: " + e.getMessage());
             }

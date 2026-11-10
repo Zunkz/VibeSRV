@@ -1,5 +1,6 @@
 package com.fluxer.srv.listeners;
 
+import com.fluxer.srv.AdvancementNames;
 import com.fluxer.srv.FluxerSRV;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -16,6 +17,11 @@ public class AdvancementListener implements Listener {
 
     @EventHandler(priority = EventPriority.NORMAL)
     public void onAchievementDone(PlayerAchievementAwardedEvent event) {
+        String known = AdvancementNames.achievementTitle(event.getAchievement().name());
+        if (known != null) {
+            AdvancementHook.announce(plugin, event.getPlayer().getName(), known, "", "TASK");
+            return;
+        }
         String title = event.getAchievement().name().replace("_", " ").toLowerCase();
         // Capitalize the first letters of words in the achievement name
         String[] words = title.split(" ");
