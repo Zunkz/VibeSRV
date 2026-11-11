@@ -91,8 +91,9 @@ public class FluxerSRV extends JavaPlugin {
             fluxerClient.setListener(new com.fluxer.srv.listeners.FluxerMessageListener(this));
             fluxerClient.connect();
             if (mainChannelId != null && !mainChannelId.isEmpty() && !mainChannelId.equals("000000000000000000")) {
-                fluxerClient.getRestApi().sendMessage(mainChannelId,
-                        getConfig().getString("formats.serverStart", "# Server Started \u2705"));
+                EventEmbeds.send(this, mainChannelId,
+                        getConfig().getString("formats.serverStart", "# Server Started \u2705"),
+                        "serverStart", 0x57F287);
             }
         } catch (Exception e) {
             getLogger().severe("Failed to connect to Fluxer Gateway: " + e.getMessage());
@@ -136,8 +137,9 @@ public class FluxerSRV extends JavaPlugin {
         if (fluxerClient != null) {
             if (mainChannelId != null && !mainChannelId.isEmpty() && !mainChannelId.equals("000000000000000000")) {
                 try {
-                    fluxerClient.getRestApi().sendMessage(mainChannelId,
-                            getConfig().getString("formats.serverStop", "# Server Stopped \u274C"));
+                    EventEmbeds.send(this, mainChannelId,
+                            getConfig().getString("formats.serverStop", "# Server Stopped \u274C"),
+                            "serverStop", 0xED4245);
                 } catch (IOException e) {
                     getLogger().warning("Failed to send server stop message: " + e.getMessage());
                 }
@@ -348,13 +350,12 @@ public class FluxerSRV extends JavaPlugin {
                 .replace("%player_uuid%", playerUuid);
     }
 
-    /** Embeds with the title as the author line, plus the player's head as its icon when the embed asks for it. */
+    /** Embeds with just the title as the author line: no player icon. */
     public java.util.List<com.google.gson.JsonObject> buildEmbeds(String playerName, String playerUuid,
                                                                   java.util.List<ChatPlaceholders.Embed> embeds) {
-        String icon = playerAvatarUrl(playerName, playerUuid);
         java.util.List<com.google.gson.JsonObject> out = new java.util.ArrayList<>();
         for (ChatPlaceholders.Embed embed : embeds) {
-            out.add(FluxerRestApi.authorEmbed(embed.title, embed.icon ? icon : null, embed.body, embed.color));
+            out.add(FluxerRestApi.authorEmbed(embed.title, null, embed.body, embed.color));
         }
         return out;
     }

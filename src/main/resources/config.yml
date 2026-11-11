@@ -1,14 +1,41 @@
-# FluxerSRV Configuration File
+# ==============================================
+#  FluxerSRV
+# ==============================================
 
-# Bot Token from Fluxer
+# Bot token from Fluxer
 botToken: ""
 
-# Channel mappings
+# Channel IDs
 channels:
   global: "000000000000000000"
   console: "000000000000000000"
 
-# Minecraft -> Fluxer
+# General
+fluxer-global-only: false      # true = only chat starting with "!" goes to Fluxer
+announce-advancements: true    # post advancements, goals and challenges
+
+# Post chat through a webhook, so each message shows the player's name and avatar
+webhooks:
+  enabled: false
+  url: ""
+  name: " "
+  username-format: "%player_name%"
+  avatar-url: "https://heads.discordsrv.com/%player_name%/helm/256"
+  content-format: "%message%"
+  fallback-to-bot: true        # use the bot if the webhook fails
+
+# Player count shown as the bot's status
+status:
+  enabled: true
+  update-interval-seconds: 30
+  format: "%online%/%max% players online"   # %online%, %max%
+  presence: "online"       
+
+# ==============================================
+#  Minecraft -> Fluxer
+# ==============================================
+
+# Placeholders: %player_name%, %message%, %death_message%, %advancement%, %description%
 formats:
   chat: "**%player_name%**: %message%"
   join: "**%player_name%** joined the server!"
@@ -17,15 +44,14 @@ formats:
   advancement: "🏆 **%player_name%** has made the advancement **%advancement%**"
   goal: "🎯 **%player_name%** has reached the goal **%advancement%**"
   challenge: "🏅 **%player_name%** has completed the challenge **%advancement%**"
-  serverStart: "```Server Started ✅```"
-  serverStop: "```Server Stopped ❌```"
+  serverStart: "# Server Started ✅"
+  serverStop: "# Server Stopped ❌"
 
-# Join / quit / death / advancement / goal / challenge messages are sent as embeds.
-# The formats above (formats.join, formats.quit, formats.advancement, ...) become the embed text.
+# Server start/stop, join, quit, death and advancement posts are sent as embeds (the formats above become the text).
 embeds:
-  # false = send these as plain messages instead of embeds
+  # Master switch for all embeds. false = plain messages instead.
   enabled: true
-  # Side-bar color of each embed: "#RRGGBB" hex (or a decimal number)
+  # Side-bar colors ("#RRGGBB")
   colors:
     join: "#57F287"
     quit: "#ED4245"
@@ -33,121 +59,94 @@ embeds:
     goal: "#3498DB"
     challenge: "#9B59B6"
     death: "#2F3136"
+    playerlist: "#5865F2"
+    time: "#F1C40F"
+    serverStart: "#57F287"
+    serverStop: "#ED4245"
 
-# Fluxer -> Minecraft
-# Color codes: &a, &l, etc., and hex colors as &#RRGGBB
+# ==============================================
+#  Fluxer -> Minecraft
+# ==============================================
+
+# Colors: &a, &l, ... and hex as &#RRGGBB
 # Placeholders: %username%, %display_name%, %nickname%, %message%
 ingame:
   format: "[&bFluxer&r] <%username%> %message%"
   reply-format: "[&bFluxer&r] <%username%> &7(reply)&r %message%"
   reply-preview-length: 50
-  # Let Fluxer users &-color codes in their messages.
-  allow-message-colors: true
-  # Make links in Fluxer messages clickable in Minecraft chat.
-  # false = the full URL is shown as plain text instead (the placeholders below are ignored).
+  allow-message-colors: true   # let Fluxer users use &-color codes
+
+  # Links and attachments (false = show the full URL as plain text)
   clickable-links: true
-  # Make attachments (images, gifs, videos and files) clickable.
-  # false = the attachment's full URL is shown as plain text instead.
   clickable-media: true
-  # Clickable attachments and links show only their name (%name%): the file name for
-  # attachments, the [text] of a [text](url) link, or the shortened URL for a plain link.
-  # Leave a value empty to hide it (attachments only).
+  # What clickable links and attachments display (%name% = file name, link text or short URL)
   media-placeholder: "&b&n%name%&r"
   file-placeholder: "&b&n%name%&r"
   link-placeholder: "&b&n%name%&r"
-  # Plain links longer than this are cut with "..."
-  link-max-length: 40
+  link-max-length: 40          # longer plain links are cut with "..."
 
   mentions:
-    user-format: "&b@%name%&r"
-    role-format: "&b@%name%&r"
-    channel-format: "&b#%name%&r"
-    # Which name to show for mentioned users: username, display_name or nickname
-    # (nickname = their server nickname, falling back to display name)
-    name-source: "nickname"
+    user-format: "&b@%name%"
+    role-format: "&b@%name%"
+    channel-format: "&b#%name%"
+    name-source: "nickname"    # username, display_name or nickname
+                 # online, idle, dnd or invisible
 
-# Per-player chat webhooks
-# When enabled, in-game chat is posted to the global channel through a webhook, so each
-# message shows the player's own name and avatar instead of coming from the bot.
-webhooks:
-  enabled: true
-  # An existing webhook URL, used exactly as given, e.g.
-  # https://fluxer.com/api/webhooks/<id>/<token>
-  url: ""
-  name: " "
-  username-format: "%player_name%"
-  avatar-url: "https://heads.discordsrv.com/%player_name%/helm/256"
-  content-format: "%message%"
-  fallback-to-bot: true
+# ==============================================
+#  InteractiveChat
+# ==============================================
 
-# Live player count shown as the bot's custom status on Fluxer
-status:
-  enabled: true
-  update-interval-seconds: 30
-  # Placeholders: %online%, %max%
-  format: "%online%/%max% players online"
-  # online, idle, dnd or invisible
-  presence: "online"
-
-# InteractiveChat Support
 interactivechat:
   enabled: true
-  # Max characters of each details block (items, inventories, hover text)
-  max-details-length: 1900
+  max-details-length: 1900     # max characters per details block
+
+  # [item]  (%item% = name and amount, %player%)
   item:
     enabled: true
     keyword: "[item]"
-    # %item% = name (and "x<amount>"), %player%
     inline: "`[%item%]`"
-    # Used when the player isn't holding anything
-    empty-inline: "`[Nothing]`"
-    # Show [item] (and mc!item) as an embed instead of an inline tag + code block.
-    # With embed.enabled the message keeps only the player's own text (the inline tag is not sent).
+    empty-inline: "`[Nothing]`"     # when the player holds nothing
+    # Show as an embed instead of an inline tag + code block
     embed:
       enabled: true
-      # Side-bar color: "#RRGGBB"
       color: "#3498DB"
-      # Placeholders: %player%, %item%
-      title: "%player%'s Item"
+      title: "%player%'s Item"      # %player%, %item%
+
+  # [inv]
   inventory:
     enabled: true
     keyword: "[inv]"
     inline: "`[%player%'s Inventory]`"
-    # Show [inv] (and mc!inv) as an embed instead of an inline tag + code block.
     embed:
       enabled: true
-      # Show the player's head as the embed's icon (same URL as webhooks.avatar-url).
-      # Every embed has this option; it is on by default only for the inventory.
-      icon: true
-      # Side-bar color: "#RRGGBB"
       color: "#5865F2"
-      # Placeholders: %player%
       title: "%player%'s Inventory"
+
+  # [ender]
   enderchest:
     enabled: true
     keyword: "[ender]"
     inline: "`[%player%'s Ender Chest]`"
-    # Same as inventory.embed, for [ender] (and mc!ender)
     embed:
       enabled: true
       color: "#8E44AD"
       title: "%player%'s Ender Chest"
-  # What is inside a shulker box you share with [item] (or mc!item).
-  # With embed.enabled the contents are shown in an embed (no icon, no inline tag).
+
+  # Contents of a shulker box shared with [item]
   shulker:
     embed:
       enabled: true
       color: "#CB4DCB"
-      # Placeholders: %player%, %item% (the shulker box's name)
-      title: "%player%'s %item%"
+      title: "%player%'s %item%"    # %item% = the box's name
+
+  # Your own placeholders (any PlaceholderAPI or %player_*% value)
   custom:
     - keyword: "[pos]"
       replace: "`[%player_world%: %player_x% %player_y% %player_z%]`"
+
+  # Text commands in the global channel:
+  # <prefix>playerlist, <prefix>time, <prefix>item|inv|ender <player>
   commands:
     enabled: true
     prefix: "mc!"
-
-# Turning this TRUE won't send messages without "!" before them to Fluxer.
-fluxer-global-only: false
-# Send player advancements (and challenges/goals) to the global channel
-announce-advancements: true
+    time-world: "world"             # world for <prefix>time (empty = main world)

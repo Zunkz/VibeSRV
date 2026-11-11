@@ -5,6 +5,7 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.block.BlockState;
 import org.bukkit.inventory.Inventory;
@@ -55,18 +56,16 @@ public final class ChatPlaceholders {
         }
     }
 
-    /** One embed: title (the author line), body (markdown text), side-bar color and whether it shows the player's head icon. */
+    /** One embed: title (the author line, no icon), body (markdown text) and side-bar color. */
     public static final class Embed {
         public final String title;
         public final String body;
         public final int color;
-        public final boolean icon;
 
-        Embed(String title, String body, int color, boolean icon) {
+        Embed(String title, String body, int color) {
             this.title = title;
             this.body = body;
             this.color = color;
-            this.icon = icon;
         }
     }
 
@@ -291,7 +290,8 @@ public final class ChatPlaceholders {
 
     /** interactivechat.<section>.embed.enabled (on by default): section is item, inventory, enderchest or shulker. */
     private boolean embedEnabled(String section) {
-        return cfg().getBoolean("interactivechat." + section + ".embed.enabled", true);
+        return cfg().getBoolean("embeds.enabled", true)
+                && cfg().getBoolean("interactivechat." + section + ".embed.enabled", true);
     }
 
     private Embed makeEmbed(String section, String defaultTitle, Player player, String itemName,
@@ -300,9 +300,7 @@ public final class ChatPlaceholders {
                 .replace("%player%", safe(player.getName()))
                 .replace("%item%", safe(itemName == null ? "" : itemName));
         int color = EventEmbeds.parseColor(cfg().get("interactivechat." + section + ".embed.color"), 0x5865F2);
-        // the player's head icon: on for the inventory embed by default, off for the others
-        boolean icon = cfg().getBoolean("interactivechat." + section + ".embed.icon", section.equals("inventory"));
-        return new Embed(title, embedText(max, bodyLines, headings), color, icon);
+        return new Embed(title, embedText(max, bodyLines, headings), color);
     }
 
     /** Lines without the first one, which is the "X's Inventory" heading the embed title replaces. */
@@ -407,14 +405,14 @@ public final class ChatPlaceholders {
         return player.hasPermission(defaultPermission);
     }
 
-    // ---- Fluxer text commands (!item, !inv, !ender, !playerlist) ----
+    // ---- Fluxer text commands (!item, !inv, !ender, !playerlist, !time) ----
 
     /**
      * Handles a message typed in the Fluxer global channel as a command. Returns true if it was
      * one (so it shouldn't be shown in-game). Off unless interactivechat.commands.enabled.
      */
     public boolean handleFluxerCommand(String channelId, String content) {
-        if (!isEnabled() || !cfg().getBoolean("interactivechat.commands.enabled", false)) {
+        if (!cfg().getBoolean("interactivechat.commands.enabled", false)) {
             return false;
         }
         String prefix = cfg().getString("interactivechat.commands.prefix", "!");
@@ -424,11 +422,28 @@ public final class ChatPlaceholders {
         }
         String[] parts = trimmed.substring(prefix.length()).trim().split("\\s+");
         String command = parts[0].toLowerCase(Locale.ROOT);
-        if (!command.equals("playerlist") && !command.equals("item")
-                && !command.equals("inv") && !command.equals("ender")) {
+        boolean general = command.equals("playerlist") || command.equals("time");
+        boolean placeholder = command.equals("item") || command.equals("inv") || command.equals("ender");
+        if (!general && !(placeholder && isEnabled())) {
             return false;
         }
         String argument = parts.length > 1 ? parts[1] : "";
+
+        if (general) {
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                final String text = command.equals("time") ? timeText() : playerListText();
+                final String colorKey = command.equals("time") ? "time" : "playerlist";
+                final int defaultColor = command.equals("time") ? 0xF1C40F : 0x5865F2;
+                plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
+                        EventEmbeds.send(plugin, channelId, text, colorKey, defaultColor);
+                    } catch (Exception e) {
+                        plugin.getLogger().warning("Failed to send command reply to Fluxer: " + e.getMessage());
+                    }
+                });
+            });
+            return true;
+        }
 
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             Player target = argument.isEmpty() ? null : plugin.getServer().getPlayerExact(argument);
@@ -477,26 +492,56 @@ public final class ChatPlaceholders {
         return true;
     }
 
+    /** "## Players Online (n/max)" followed by one bullet per player. */
+    private String playerListText() {
+        List<String> names = new ArrayList<>();
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            names.add(safe(player.getName()));
+        }
+        Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
+        StringBuilder text = new StringBuilder("## Players Online (")
+                .append(names.size()).append('/').append(plugin.getServer().getMaxPlayers()).append(')');
+        if (names.isEmpty()) {
+            text.append("\n*Nobody is online*");
+        }
+        for (String name : names) {
+            text.append("\n- ").append(name);
+        }
+        return text.length() > 4000 ? text.substring(0, 3990) + "\n..." : text.toString();
+    }
+
+    /** The in-game time of the first (main) world, e.g. "7:30 AM", with the day number and phase of the day. */
+    private String timeText() {
+        World world = plugin.getServer().getWorlds().get(0);
+        String configured = cfg().getString("interactivechat.commands.time-world", "");
+        if (configured != null && !configured.isEmpty()) {
+            World named = plugin.getServer().getWorld(configured);
+            if (named != null) {
+                world = named;
+            }
+        }
+        long ticks = world.getTime() % 24000L;
+        long fullTime = world.getFullTime();
+        int hour24 = (int) ((ticks / 1000L + 6L) % 24L);
+        int minute = (int) ((ticks % 1000L) * 60L / 1000L);
+        int hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+        String phase;
+        if (ticks >= 23000L || ticks < 1000L) {
+            phase = "Sunrise";
+        } else if (ticks < 12000L) {
+            phase = "Day";
+        } else if (ticks < 13000L) {
+            phase = "Sunset";
+        } else {
+            phase = "Night";
+        }
+        return "## In-Game Time\n**" + hour12 + ":" + (minute < 10 ? "0" : "") + minute + " "
+                + (hour24 < 12 ? "AM" : "PM") + "** \u2014 " + phase
+                + "\nDay " + (fullTime / 24000L + 1L) + " \u00B7 " + safe(world.getName());
+    }
+
     private String commandReply(String prefix, String command, String argument) {
         int max = maxLength();
-        if (command.equals("playerlist")) {
-            Collection<? extends Player> online = plugin.getServer().getOnlinePlayers();
-            List<String> names = new ArrayList<>();
-            for (Player player : online) {
-                names.add(safe(player.getName()));
-            }
-            Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
-            List<String> lines = new ArrayList<>();
-            lines.add("Players online (" + names.size() + "/" + plugin.getServer().getMaxPlayers() + ")");
-            if (names.isEmpty()) {
-                lines.add("  (nobody)");
-            }
-            for (String name : names) {
-                lines.add("  " + name);
-            }
-            return codeBlock(max, lines);
-        }
-
         if (argument.isEmpty()) {
             return "Usage: `" + safe(prefix) + command + " <player>`";
         }
