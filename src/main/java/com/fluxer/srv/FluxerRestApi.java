@@ -27,6 +27,26 @@ public class FluxerRestApi {
         }
     }
 
+    /** A file uploaded with a message; embeds refer to it as attachment://<filename>. */
+    public static final class Attachment {
+        public final String filename;
+        public final java.io.File file;
+        public final byte[] data;
+
+        public Attachment(String filename, java.io.File file) {
+            this.filename = filename;
+            this.file = file;
+            this.data = null;
+        }
+
+        /** A file held in memory (e.g. an icon cut out of an atlas). */
+        public Attachment(String filename, byte[] data) {
+            this.filename = filename;
+            this.file = null;
+            this.data = data;
+        }
+    }
+
     private static Webhook webhookOf(String id, String token) {
         return new Webhook(id, token, BASE_URL + "/webhooks/" + id + "/" + token);
     }
@@ -36,18 +56,10 @@ public class FluxerRestApi {
         this.httpClient = httpClient;
     }
 
-    public void sendMessage(String channelId, String content, boolean announcement) throws IOException {
+    public void sendMessage(String channelId, String content) throws IOException {
         JsonObject body = new JsonObject();
         body.addProperty("content", content);
-        if (announcement) {
-            body.addProperty("announcement", true);
-        }
-
         post("/channels/" + channelId + "/messages", body);
-    }
-
-    public void sendMessage(String channelId, String content) throws IOException {
-        sendMessage(channelId, content, false);
     }
 
     /** Sends a message with optional text content and prebuilt embeds. */
@@ -59,6 +71,69 @@ public class FluxerRestApi {
         }
         body.add("embeds", embedArray(embeds));
         post("/channels/" + channelId + "/messages", body);
+    }
+
+    /** Message with embeds and uploaded files (plain JSON when there are no files). */
+    public void sendMessage(String channelId, String content, java.util.List<JsonObject> embeds,
+                            java.util.List<Attachment> files) throws IOException {
+        if (files == null || files.isEmpty()) {
+            sendMessage(channelId, content, embeds);
+            return;
+        }
+        JsonObject body = new JsonObject();
+        if (content != null && !content.isEmpty()) {
+            body.addProperty("content", content);
+        }
+        body.add("embeds", embedArray(embeds));
+        postMultipart(BASE_URL + "/channels/" + channelId + "/messages", body, files, true);
+    }
+
+    /** Webhook message with embeds and uploaded files. */
+    public void executeWebhook(Webhook webhook, String content, String username, String avatarUrl,
+                               java.util.List<JsonObject> embeds, java.util.List<Attachment> files)
+            throws IOException {
+        if (files == null || files.isEmpty()) {
+            executeWebhook(webhook, content, username, avatarUrl, embeds);
+            return;
+        }
+        JsonObject body = new JsonObject();
+        if (content != null && !content.trim().isEmpty()) {
+            body.addProperty("content", content);
+        }
+        body.add("embeds", embedArray(embeds));
+        if (username != null && !username.isEmpty()) {
+            body.addProperty("username", username);
+        }
+        if (avatarUrl != null && !avatarUrl.isEmpty()) {
+            body.addProperty("avatar_url", avatarUrl);
+        }
+        postMultipart(webhook.url, body, files, false);
+    }
+
+    /** multipart/form-data: the JSON in "payload_json", each file as "files[n]" matched by attachment id. */
+    private void postMultipart(String url, JsonObject body, java.util.List<Attachment> files, boolean authorize)
+            throws IOException {
+        com.google.gson.JsonArray described = new com.google.gson.JsonArray();
+        MultipartBody.Builder multipart = new MultipartBody.Builder().setType(MultipartBody.FORM);
+        for (int i = 0; i < files.size(); i++) {
+            Attachment file = files.get(i);
+            JsonObject info = new JsonObject();
+            info.addProperty("id", i);
+            info.addProperty("filename", file.filename);
+            described.add(info);
+            RequestBody content = file.data != null
+                    ? RequestBody.create(MediaType.parse("image/png"), file.data)
+                    : RequestBody.create(MediaType.parse("image/png"), file.file);
+            multipart.addFormDataPart("files[" + i + "]", file.filename, content);
+        }
+        body.add("attachments", described);
+        multipart.addFormDataPart("payload_json", null, RequestBody.create(JSON, body.toString()));
+
+        Request.Builder builder = new Request.Builder().url(url).post(multipart.build());
+        if (authorize) {
+            builder.header("Authorization", "Bot " + token);
+        }
+        execute(builder.build());
     }
 
     private static com.google.gson.JsonArray embedArray(java.util.List<JsonObject> embeds) {

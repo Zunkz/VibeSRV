@@ -22,16 +22,7 @@ public class AdvancementListener implements Listener {
             AdvancementHook.announce(plugin, event.getPlayer().getName(), known, "", "TASK");
             return;
         }
-        String title = event.getAchievement().name().replace("_", " ").toLowerCase();
-        // Capitalize the first letters of words in the achievement name
-        String[] words = title.split(" ");
-        for (int i = 0; i < words.length; i++) {
-            if (words[i].length() > 0) {
-                words[i] = words[i].substring(0, 1).toUpperCase() + words[i].substring(1);
-            }
-        }
-        title = String.join(" ", words);
-
+        String title = AdvancementHook.titleFromKey(event.getAchievement().name().toLowerCase());
         AdvancementHook.announce(plugin, event.getPlayer().getName(), title, "", "TASK");
     }
 }

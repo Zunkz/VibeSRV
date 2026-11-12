@@ -34,8 +34,7 @@ public class ChatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerChat(AsyncPlayerChatEvent event) {
         String original = originals.remove(event.getPlayer().getUniqueId());
-        String mainChannelId = plugin.getMainChannelId();
-        if (mainChannelId == null || mainChannelId.isEmpty() || mainChannelId.equals("000000000000000000")) {
+        if (!plugin.hasMainChannel()) {
             return;
         }
 
@@ -80,7 +79,7 @@ public class ChatListener implements Listener {
         // If the message was only [item]/[inv]/[ender], the embed's title already names the player
         final String message = rawMessage.trim().isEmpty() && embeds != null && !embeds.isEmpty()
                 ? ""
-                : format.replace("%player_name%", event.getPlayer().getName())
+                : plugin.papi(event.getPlayer(), format.replace("%player_name%", event.getPlayer().getName()))
                         .replace("%message%", rawMessage);
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin,

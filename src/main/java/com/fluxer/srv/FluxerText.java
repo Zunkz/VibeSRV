@@ -321,12 +321,7 @@ public final class FluxerText {
             }
         }
 
-        String nameSource = plugin.getConfig().getString("ingame.mentions.name-source", null);
-        if (nameSource == null) {
-            // older configs used a boolean
-            nameSource = plugin.getConfig().getBoolean("ingame.mentions.use-display-name", false)
-                    ? "display_name" : "username";
-        }
+        String nameSource = plugin.getConfig().getString("ingame.mentions.name-source", "nickname");
         String userFormat = plugin.getConfig().getString("ingame.mentions.user-format", "&b@%name%");
         String roleFormat = plugin.getConfig().getString("ingame.mentions.role-format", "&b@%name%");
         String channelFormat = plugin.getConfig().getString("ingame.mentions.channel-format", "&b#%name%");

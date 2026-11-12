@@ -21,11 +21,11 @@ import java.lang.reflect.Method;
 public final class AdvancementHook {
 
     private static final String DEFAULT_ADVANCEMENT =
-            "\uD83C\uDFC6 **%player_name%** has made the advancement **%advancement%**";
+            "**%player_name%** has made the advancement **%advancement%**";
     private static final String DEFAULT_GOAL =
-            "\uD83C\uDFAF **%player_name%** has reached the goal **%advancement%**";
+            "**%player_name%** has reached the goal **%advancement%**";
     private static final String DEFAULT_CHALLENGE =
-            "\uD83C\uDFC5 **%player_name%** has completed the challenge **%advancement%**";
+            "**%player_name%** has completed the challenge **%advancement%**";
 
     private AdvancementHook() {
     }
@@ -124,7 +124,7 @@ public final class AdvancementHook {
     }
 
     /** "story/mine_stone" -> "Mine Stone" (used when the real title isn't available). */
-    private static String titleFromKey(String path) {
+    static String titleFromKey(String path) {
         String last = path.substring(path.lastIndexOf('/') + 1).replace('_', ' ');
         StringBuilder out = new StringBuilder();
         for (String word : last.split(" ")) {
@@ -148,10 +148,10 @@ public final class AdvancementHook {
         if (!plugin.getConfig().getBoolean("announce-advancements", true)) {
             return;
         }
-        String mainChannelId = plugin.getMainChannelId();
-        if (mainChannelId == null || mainChannelId.isEmpty() || mainChannelId.equals("000000000000000000")) {
+        if (!plugin.hasMainChannel()) {
             return;
         }
+        String mainChannelId = plugin.getMainChannelId();
 
         String configKey;
         String fallback;
@@ -178,8 +178,8 @@ public final class AdvancementHook {
                 break;
         }
 
-        String message = plugin.getConfig().getString(configKey, fallback)
-                .replace("%player_name%", playerName)
+        String message = plugin.papi(plugin.getServer().getPlayerExact(playerName),
+                plugin.getConfig().getString(configKey, fallback).replace("%player_name%", playerName))
                 .replace("%advancement%", ChatColor.stripColor(title))
                 .replace("%description%", ChatColor.stripColor(description));
 

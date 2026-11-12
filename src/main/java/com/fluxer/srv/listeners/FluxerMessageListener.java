@@ -6,7 +6,7 @@ import com.fluxer.srv.FluxerText;
 import com.google.gson.JsonObject;
 import org.bukkit.ChatColor;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -90,9 +90,9 @@ public class FluxerMessageListener implements FluxerListener {
         // A reply carries the original message in "referenced_message" (null if it was deleted)
         JsonObject ref = FluxerText.obj(message, "referenced_message");
 
-        String template = FluxerSRV.colorize(ref != null
+        String template = FluxerSRV.colorize(plugin.papi(null, ref != null
                 ? plugin.getConfig().getString("ingame.reply-format", DEFAULT_REPLY_FORMAT)
-                : plugin.getConfig().getString("ingame.format", DEFAULT_FORMAT));
+                : plugin.getConfig().getString("ingame.format", DEFAULT_FORMAT)));
 
         String replyUsername = "";
         String replyDisplayName = "";
@@ -171,11 +171,7 @@ public class FluxerMessageListener implements FluxerListener {
         matcher.appendTail(out);
 
         // "\n" in a format starts a new chat line
-        List<String> lines = new ArrayList<>();
-        for (String line : out.toString().split("\n")) {
-            lines.add(line);
-        }
-        return lines;
+        return Arrays.asList(out.toString().split("\n"));
     }
 
     private static String clean(String text) {

@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.neovisionaries.ws.client.*;
 import okhttp3.OkHttpClient;
 
+import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.Executors;
@@ -22,6 +23,14 @@ public class FluxerClient {
     private static final long MAX_BACKOFF_SECONDS = 60L;
     // Resumable close code we use when we drop a connection ourselves (1000/1001 end the session)
     private static final int CLOSE_RESUMABLE = 4000;
+    // Never open gateway connections closer together than this (Identify is limited to ~1 per 5s)
+    private static final long MIN_CONNECT_GAP_MS = 5_000L;
+    // A connection that stayed up this long counts as healthy and resets the reconnect backoff
+    private static final long STABLE_CONNECTION_MS = 30_000L;
+    // Minimum wait after the gateway tells us we are being rate limited (close code 4008)
+    private static final long RATE_LIMITED_BACKOFF_SECONDS = 30L;
+    // Heartbeats in a row that may go unacknowledged before we call the connection dead
+    private static final int MAX_MISSED_ACKS = 2;
 
     private final String token;
     private volatile WebSocket ws;
@@ -30,6 +39,10 @@ public class FluxerClient {
     private volatile String sessionId;
     private Timer heartbeatTimer;
     private volatile boolean heartbeatAcked = true;
+    private volatile int missedAcks = 0;
+    private final Random random = new Random();
+    private volatile long readyAt = 0L;
+    private volatile long lastConnectAttempt = 0L;
     private FluxerListener listener;
     private final Logger logger;
 
@@ -74,6 +87,7 @@ public class FluxerClient {
             return;
         }
         reconnectScheduled = false;
+        lastConnectAttempt = System.currentTimeMillis();
         try {
             WebSocket socket = new WebSocketFactory()
                     .setConnectionTimeout(5000)
@@ -113,16 +127,23 @@ public class FluxerClient {
         } catch (Exception e) {
             logger.warning("[Fluxer] Could not connect to gateway: " + e.getMessage());
             ready = false;
-            scheduleReconnect();
+            scheduleReconnect(0L);
         }
     }
 
     private void handleDisconnect(int code, String reason) {
         ready = false;
         stopHeartbeat();
+        long now = System.currentTimeMillis();
         if (disconnectedAt == 0L) {
-            disconnectedAt = System.currentTimeMillis();
+            disconnectedAt = now;
         }
+        // Only a connection that stayed healthy for a while resets the backoff. Resetting on
+        // Hello (as before) made a gateway that closes us right after Hello get hammered at 1s.
+        if (readyAt != 0L && now - readyAt >= STABLE_CONNECTION_MS) {
+            reconnectAttempts = 0;
+        }
+        readyAt = 0L;
         if (shuttingDown) {
             return;
         }
@@ -132,7 +153,7 @@ public class FluxerClient {
 
         // Fluxer ends the session on 1000/1001, and a bad sequence (4007) means our resume
         // state is unusable. Either way the next connection must Identify fresh.
-        if (code == 1000 || code == 1001 || code == 4007) {
+        if (code == 1000 || code == 1001 || code == 4003 || code == 4005 || code == 4007 || code == 4009) {
             sessionId = null;
             sequence = 0;
         }
@@ -144,24 +165,33 @@ public class FluxerClient {
                     + "Check your bot token and plugin version, then run /fluxer reload.");
             return;
         }
-        scheduleReconnect();
+        if (code == 4008) {
+            logger.warning("[Fluxer] Gateway says we are being rate limited; backing off.");
+            scheduleReconnect(RATE_LIMITED_BACKOFF_SECONDS);
+            return;
+        }
+        scheduleReconnect(0L);
     }
 
-    private synchronized void scheduleReconnect() {
+    private synchronized void scheduleReconnect(long minDelaySeconds) {
         if (shuttingDown || fatal || reconnectScheduled) {
             return;
         }
         reconnectScheduled = true;
-        long delay = Math.min(MAX_BACKOFF_SECONDS, 1L << Math.min(reconnectAttempts, 6));
+        // 2s, 4s, 8s ... capped at 60s, plus up to 1s of jitter
+        long delayMs = Math.min(MAX_BACKOFF_SECONDS, 2L << Math.min(reconnectAttempts, 5)) * 1000L;
+        delayMs = Math.max(delayMs, minDelaySeconds * 1000L) + random.nextInt(1000);
+        // Never connect more often than the gateway's Identify limit allows
+        delayMs = Math.max(delayMs, lastConnectAttempt + MIN_CONNECT_GAP_MS - System.currentTimeMillis());
         reconnectAttempts++;
-        logger.info("[Fluxer] Reconnecting to gateway in " + delay + "s...");
+        logger.info("[Fluxer] Reconnecting to gateway in " + Math.round(delayMs / 1000.0) + "s...");
         try {
             scheduler.schedule(new Runnable() {
                 @Override
                 public void run() {
                     openSocket();
                 }
-            }, delay, TimeUnit.SECONDS);
+            }, delayMs, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             reconnectScheduled = false; // scheduler already shut down
         }
@@ -169,9 +199,11 @@ public class FluxerClient {
 
     /** Drops the current connection in a way Fluxer lets us resume. */
     private void dropConnection(String reason) {
+        stopHeartbeat();
         WebSocket socket = ws;
         if (socket != null) {
-            socket.disconnect(CLOSE_RESUMABLE, reason);
+            // Short close delay: don't wait 10s for a dead peer to answer the close frame
+            socket.disconnect(CLOSE_RESUMABLE, reason, 1000L);
         }
     }
 
@@ -190,8 +222,8 @@ public class FluxerClient {
             case 10: // Hello
                 int heartbeatInterval = packet.getAsJsonObject("d").get("heartbeat_interval").getAsInt();
                 heartbeatAcked = true;
-                startHeartbeat(heartbeatInterval);
-                reconnectAttempts = 0;
+                missedAcks = 0;
+                startHeartbeat(ws, heartbeatInterval);
                 if (canResume()) {
                     resume();
                 } else {
@@ -216,6 +248,7 @@ public class FluxerClient {
                 sessionId = null;
                 sequence = 0;
                 ready = false;
+                readyAt = 0L;
                 scheduler.schedule(new Runnable() {
                     @Override
                     public void run() {
@@ -227,6 +260,7 @@ public class FluxerClient {
                 break;
             case 11: // Heartbeat ACK
                 heartbeatAcked = true;
+                missedAcks = 0;
                 break;
         }
     }
@@ -252,6 +286,7 @@ public class FluxerClient {
         // Commands sent after Resume are handled after it, so the session is usable straight away
         disconnectedAt = 0L;
         ready = true;
+        readyAt = System.currentTimeMillis();
         if (presence != null) {
             sendPresence();
         }
@@ -278,25 +313,35 @@ public class FluxerClient {
         ws.sendText(payload.toString());
     }
 
-    private void startHeartbeat(int interval) {
+    private void startHeartbeat(final WebSocket socket, final int interval) {
         stopHeartbeat();
-        heartbeatTimer = new Timer("FluxerSRV-Heartbeat", true);
-        heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
+        Timer timer = new Timer("FluxerSRV-Heartbeat", true);
+        heartbeatTimer = timer;
+        // First beat at a random point inside the interval; fixed-DELAY schedule (not fixed-rate)
+        // so a server lag spike can't make missed ticks fire back-to-back and look like a dead link.
+        long firstDelay = Math.max(500L, (long) (interval * random.nextDouble()));
+        timer.schedule(new TimerTask() {
             @Override
             public void run() {
                 try {
-                    if (!heartbeatAcked) {
-                        // No ACK for the last heartbeat: the connection is dead. Drop it and reconnect.
-                        logger.warning("[Fluxer] Gateway heartbeat was not acknowledged; reconnecting.");
-                        dropConnection("No heartbeat ACK");
+                    if (socket != ws) {
+                        cancel(); // belongs to a connection we already replaced
                         return;
+                    }
+                    if (!heartbeatAcked) {
+                        missedAcks++;
+                        if (missedAcks >= MAX_MISSED_ACKS) {
+                            logger.warning("[Fluxer] Gateway heartbeat was not acknowledged; reconnecting.");
+                            dropConnection("No heartbeat ACK");
+                            return;
+                        }
                     }
                     sendHeartbeat();
                 } catch (Exception e) {
                     logger.warning("[Fluxer] Heartbeat failed: " + e.getMessage());
                 }
             }
-        }, interval, interval);
+        }, firstDelay, interval);
     }
 
     private void sendHeartbeat() {
@@ -322,10 +367,14 @@ public class FluxerClient {
             sessionId = data.get("session_id").getAsString();
             disconnectedAt = 0L;
             ready = true;
+            readyAt = System.currentTimeMillis();
             if (presence != null) {
                 sendPresence();
             }
             logger.info("[Fluxer] Logged in as " + data.getAsJsonObject("user").get("username").getAsString());
+        } else if (type.equals("RESUMED")) {
+            readyAt = System.currentTimeMillis();
+            logger.info("[Fluxer] Gateway session resumed.");
         } else if (type.equals("MESSAGE_CREATE")) {
             if (listener != null) {
                 listener.onMessageCreate(data);

@@ -2,7 +2,6 @@ package com.fluxer.srv;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.World;
@@ -61,6 +60,18 @@ public final class ChatPlaceholders {
         public final String title;
         public final String body;
         public final int color;
+        /** Material name in lower case (e.g. "diamond_pickaxe") of the item shown, for its thumbnail; null if none. */
+        public String material;
+        /** The player's inventory (see {@link InventoryImage#SLOTS}) to draw as a picture; null if none. */
+        public InventoryImage.Slot[] slots;
+        /** Name of the player whose picture goes in the [inv] picture's player slot; null if none. */
+        public String playerName;
+        /** The 27 slots of a shulker box / ender chest to draw as a picture; null if none. */
+        public InventoryImage.Slot[] containerSlots;
+        /** Texture of that container's screen ({@link InventoryImage#SHULKER_TEXTURE} / {@link InventoryImage#CHEST_TEXTURE}). */
+        public String containerTexture;
+        /** Config section (enderchest or shulker) holding that picture's settings under embed.image. */
+        public String containerSection;
 
         Embed(String title, String body, int color) {
             this.title = title;
@@ -189,9 +200,9 @@ public final class ChatPlaceholders {
             ItemStack held = player.getItemInHand();
             String inline;
             if (isEmpty(held)) {
-                inline = cfg().getString("interactivechat.item.empty-inline", "`[Nothing]`");
+                inline = plugin.papi(player, cfg().getString("interactivechat.item.empty-inline", "`[Nothing]`"));
             } else {
-                inline = cfg().getString("interactivechat.item.inline", "`[%item%]`")
+                inline = plugin.papi(player, cfg().getString("interactivechat.item.inline", "`[%item%]`"))
                         .replace("%item%", itemTag(held))
                         .replace("%player%", safe(player.getName()));
                 if (shulkerAsEmbed(held)) {
@@ -214,7 +225,7 @@ public final class ChatPlaceholders {
                 out = replaceIgnoreCase(out, keyword("inventory", "[inv]"), "");
                 embeds.add(inventoryEmbed(player, max));
             } else {
-                String inline = cfg().getString("interactivechat.inventory.inline", "`[%player%'s Inventory]`")
+                String inline = plugin.papi(player, cfg().getString("interactivechat.inventory.inline", "`[%player%'s Inventory]`"))
                         .replace("%player%", safe(player.getName()));
                 out = replaceIgnoreCase(out, keyword("inventory", "[inv]"), inline);
                 blocks.add(codeBlock(max, inventoryLines(player)));
@@ -228,7 +239,7 @@ public final class ChatPlaceholders {
                 out = replaceIgnoreCase(out, keyword("enderchest", "[ender]"), "");
                 embeds.add(enderEmbed(player, max));
             } else {
-                String inline = cfg().getString("interactivechat.enderchest.inline", "`[%player%'s Ender Chest]`")
+                String inline = plugin.papi(player, cfg().getString("interactivechat.enderchest.inline", "`[%player%'s Ender Chest]`"))
                         .replace("%player%", safe(player.getName()));
                 out = replaceIgnoreCase(out, keyword("enderchest", "[ender]"), inline);
                 blocks.add(codeBlock(max, enderLines(player)));
@@ -244,6 +255,15 @@ public final class ChatPlaceholders {
             Object permObject = custom.get("permission");
             String permission = permObject == null ? null : String.valueOf(permObject);
             if (!allowed(player, "interactivechat.module.custom", permission)) {
+                continue;
+            }
+
+            // An embed section turns the placeholder into an embed (e.g. [pos] -> position card)
+            Object embedObject = custom.get("embed");
+            if (embedObject instanceof Map && cfg().getBoolean("embeds.enabled", true)
+                    && !"false".equalsIgnoreCase(String.valueOf(((Map<?, ?>) embedObject).get("enabled")))) {
+                embeds.add(customEmbed(player, (Map<?, ?>) embedObject, max));
+                out = replaceIgnoreCase(out, key, "");
                 continue;
             }
 
@@ -296,11 +316,41 @@ public final class ChatPlaceholders {
 
     private Embed makeEmbed(String section, String defaultTitle, Player player, String itemName,
                             List<String> bodyLines, boolean headings, int max) {
-        String title = cfg().getString("interactivechat." + section + ".embed.title", defaultTitle)
+        String title = plugin.papi(player, cfg().getString("interactivechat." + section + ".embed.title", defaultTitle))
                 .replace("%player%", safe(player.getName()))
                 .replace("%item%", safe(itemName == null ? "" : itemName));
         int color = EventEmbeds.parseColor(cfg().get("interactivechat." + section + ".embed.color"), 0x5865F2);
         return new Embed(title, embedText(max, bodyLines, headings), color);
+    }
+
+    /** An embed for a custom placeholder: title, color and body lines, all with PlaceholderAPI support. */
+    private Embed customEmbed(Player player, Map<?, ?> section, int max) {
+        Object titleObject = section.get("title");
+        String title = safe(expand(player, titleObject == null ? "%player%" : String.valueOf(titleObject)));
+        int color = EventEmbeds.parseColor(section.get("color"), 0x5865F2);
+
+        List<String> lines = new ArrayList<>();
+        Object bodyObject = section.get("body");
+        if (bodyObject instanceof Collection) {
+            for (Object line : (Collection<?>) bodyObject) {
+                lines.add(String.valueOf(line));
+            }
+        } else if (bodyObject != null) {
+            lines.addAll(java.util.Arrays.asList(String.valueOf(bodyObject).split("\n")));
+        }
+        StringBuilder body = new StringBuilder();
+        for (String line : lines) {
+            String text = defuse(expand(player, line));
+            if (body.length() + text.length() + 1 > max) {
+                body.append("\n... (truncated)");
+                break;
+            }
+            if (body.length() > 0) {
+                body.append('\n');
+            }
+            body.append(text);
+        }
+        return new Embed(title, body.toString(), color);
     }
 
     /** Lines without the first one, which is the "X's Inventory" heading the embed title replaces. */
@@ -309,24 +359,96 @@ public final class ChatPlaceholders {
     }
 
     private Embed inventoryEmbed(Player player, int max) {
-        return makeEmbed("inventory", "%player%'s Inventory", player, null,
+        Embed embed = makeEmbed("inventory", "%player%'s Inventory", player, null,
                 withoutHeading(inventoryLines(player)), true, max);
+        if (cfg().getBoolean("interactivechat.inventory.embed.image.enabled", true)) {
+            embed.slots = inventorySlots(player);
+            embed.playerName = player.getName();
+        }
+        return embed;
+    }
+
+    /** The stacks to draw in the [inv] picture, copied now because the picture is made on another thread. */
+    private static InventoryImage.Slot[] inventorySlots(Player player) {
+        InventoryImage.Slot[] slots = new InventoryImage.Slot[InventoryImage.SLOTS];
+        PlayerInventory inventory = player.getInventory();
+        for (int i = 0; i < 36; i++) {
+            slots[i] = slotOf(inventory.getItem(i));
+        }
+        ItemStack[] armor = inventory.getArmorContents(); // boots, leggings, chestplate, helmet
+        for (int i = 0; i < 4 && i < armor.length; i++) {
+            slots[36 + i] = slotOf(armor[i]);
+        }
+        Object offHand = call(inventory, "getItemInOffHand"); // 1.9+
+        if (offHand instanceof ItemStack) {
+            slots[40] = slotOf((ItemStack) offHand);
+        }
+        return slots;
+    }
+
+    private static InventoryImage.Slot slotOf(ItemStack item) {
+        if (isEmpty(item)) {
+            return null;
+        }
+        return new InventoryImage.Slot(item.getType().name().toLowerCase(Locale.ROOT), item.getAmount(),
+                damage(item), item.getType().getMaxDurability());
     }
 
     private Embed enderEmbed(Player player, int max) {
-        return makeEmbed("enderchest", "%player%'s Ender Chest", player, null,
+        Embed embed = makeEmbed("enderchest", "%player%'s Ender Chest", player, null,
                 withoutHeading(enderLines(player)), false, max);
+        embed.material = "ender_chest"; // the block icon is the small thumbnail
+        if (cfg().getBoolean("interactivechat.enderchest.embed.image.enabled", true)) {
+            InventoryImage.Slot[] slots = new InventoryImage.Slot[InventoryImage.CONTAINER_SLOTS];
+            Inventory chest = player.getEnderChest();
+            for (int i = 0; i < slots.length && i < chest.getSize(); i++) {
+                slots[i] = slotOf(chest.getItem(i));
+            }
+            embed.containerSlots = slots; // the contents are the big picture
+            embed.containerTexture = InventoryImage.CHEST_TEXTURE;
+            embed.containerSection = "enderchest";
+        }
+        return embed;
+    }
+
+    /** The 27 slots of a shulker box item in container order (empty slots stay null). */
+    private static InventoryImage.Slot[] shulkerSlots(ItemStack box) {
+        InventoryImage.Slot[] slots = new InventoryImage.Slot[InventoryImage.CONTAINER_SLOTS];
+        try {
+            ItemMeta meta = box.hasItemMeta() ? box.getItemMeta() : null;
+            if (meta instanceof BlockStateMeta) {
+                BlockState state = ((BlockStateMeta) meta).getBlockState();
+                if (state instanceof InventoryHolder) {
+                    ItemStack[] contents = ((InventoryHolder) state).getInventory().getContents();
+                    for (int i = 0; i < slots.length && i < contents.length; i++) {
+                        slots[i] = slotOf(contents[i]);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // unsupported on this server version
+        }
+        return slots;
     }
 
     /** A held item (any item, including bundles) with its enchantments, lore, durability and contents. */
     private Embed itemEmbed(Player player, ItemStack item, int max) {
-        return makeEmbed("item", "%player%'s Item", player, itemName(item),
+        Embed embed = makeEmbed("item", "%player%'s Item", player, itemName(item),
                 itemLines(item, true), true, max);
+        embed.material = item.getType().name().toLowerCase(Locale.ROOT);
+        return embed;
     }
 
     private Embed shulkerEmbed(Player player, ItemStack box, int max) {
-        return makeEmbed("shulker", "%player%'s %item%", player, itemName(box),
+        Embed embed = makeEmbed("shulker", "%player%'s %item%", player, itemName(box),
                 contentLines(containedItems(box), ""), false, max);
+        embed.material = box.getType().name().toLowerCase(Locale.ROOT); // the box icon is the small thumbnail
+        if (cfg().getBoolean("interactivechat.shulker.embed.image.enabled", true)) {
+            embed.containerSlots = shulkerSlots(box); // the contents are the big picture
+            embed.containerTexture = InventoryImage.SHULKER_TEXTURE;
+            embed.containerSection = "shulker";
+        }
+        return embed;
     }
 
     /**
@@ -467,12 +589,11 @@ public final class ChatPlaceholders {
                 }
                 if (!embeds.isEmpty()) {
                     final String embedText = text;
-                    final String targetName = target.getName();
-                    final String targetUuid = target.getUniqueId().toString();
                     plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                         try {
+                            List<FluxerRestApi.Attachment> files = new ArrayList<>();
                             plugin.getFluxerClient().getRestApi().sendMessage(channelId, embedText,
-                                    plugin.buildEmbeds(targetName, targetUuid, embeds));
+                                    plugin.buildEmbeds(embeds, files), files);
                         } catch (Exception e) {
                             plugin.getLogger().warning("Failed to send command reply to Fluxer: " + e.getMessage());
                         }
@@ -492,25 +613,31 @@ public final class ChatPlaceholders {
         return true;
     }
 
-    /** "## Players Online (n/max)" followed by one bullet per player. */
+    /** The player list embed text. Format, entry and empty text come from interactivechat.commands.*. */
     private String playerListText() {
-        List<String> names = new ArrayList<>();
-        for (Player player : plugin.getServer().getOnlinePlayers()) {
-            names.add(safe(player.getName()));
+        List<Player> players = new ArrayList<>(plugin.getServer().getOnlinePlayers());
+        Collections.sort(players, new java.util.Comparator<Player>() {
+            @Override
+            public int compare(Player a, Player b) {
+                return a.getName().compareToIgnoreCase(b.getName());
+            }
+        });
+        String title = plugin.papi(null, cfg().getString("interactivechat.commands.playerlist-title",
+                "## Players Online (%online%/%max%)"))
+                .replace("%online%", String.valueOf(players.size()))
+                .replace("%max%", String.valueOf(plugin.getServer().getMaxPlayers()));
+        StringBuilder text = new StringBuilder(ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', title)));
+        if (players.isEmpty()) {
+            text.append('\n').append(cfg().getString("interactivechat.commands.playerlist-empty", "*Nobody is online*"));
         }
-        Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
-        StringBuilder text = new StringBuilder("## Players Online (")
-                .append(names.size()).append('/').append(plugin.getServer().getMaxPlayers()).append(')');
-        if (names.isEmpty()) {
-            text.append("\n*Nobody is online*");
-        }
-        for (String name : names) {
-            text.append("\n- ").append(name);
+        String entry = cfg().getString("interactivechat.commands.playerlist-entry", "- %player_name%");
+        for (Player player : players) {
+            text.append('\n').append(defuse(expand(player, entry)));
         }
         return text.length() > 4000 ? text.substring(0, 3990) + "\n..." : text.toString();
     }
 
-    /** The in-game time of the first (main) world, e.g. "7:30 AM", with the day number and phase of the day. */
+    /** The in-game time embed text. Format comes from interactivechat.commands.time-format. */
     private String timeText() {
         World world = plugin.getServer().getWorlds().get(0);
         String configured = cfg().getString("interactivechat.commands.time-world", "");
@@ -521,7 +648,6 @@ public final class ChatPlaceholders {
             }
         }
         long ticks = world.getTime() % 24000L;
-        long fullTime = world.getFullTime();
         int hour24 = (int) ((ticks / 1000L + 6L) % 24L);
         int minute = (int) ((ticks % 1000L) * 60L / 1000L);
         int hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
@@ -535,9 +661,14 @@ public final class ChatPlaceholders {
         } else {
             phase = "Night";
         }
-        return "## In-Game Time\n**" + hour12 + ":" + (minute < 10 ? "0" : "") + minute + " "
-                + (hour24 < 12 ? "AM" : "PM") + "** \u2014 " + phase
-                + "\nDay " + (fullTime / 24000L + 1L) + " \u00B7 " + safe(world.getName());
+        String clock = hour12 + ":" + (minute < 10 ? "0" : "") + minute + " " + (hour24 < 12 ? "AM" : "PM");
+        String format = plugin.papi(null, cfg().getString("interactivechat.commands.time-format",
+                "## In-Game Time\n**%time%** - %phase%\nDay %day% | %world%"));
+        return format.replace("\\n", "\n")
+                .replace("%time%", clock)
+                .replace("%phase%", phase)
+                .replace("%day%", String.valueOf(world.getFullTime() / 24000L + 1L))
+                .replace("%world%", safe(world.getName()));
     }
 
     private String commandReply(String prefix, String command, String argument) {
@@ -562,25 +693,62 @@ public final class ChatPlaceholders {
         return codeBlock(max, enderLines(target));
     }
 
+    // ---- extra built-in placeholders for the position embed ----
+
+    private static final String[] COMPASS = {"South", "South-West", "West", "North-West", "North", "North-East", "East", "South-East"};
+
+    /** Compass direction the player is looking in, e.g. "North-East". */
+    private static String facing(Player player) {
+        float yaw = (player.getLocation().getYaw() % 360 + 360) % 360;
+        return COMPASS[Math.round(yaw / 45f) % 8];
+    }
+
+    /** Biome name in words, e.g. "Dark Forest". */
+    private static String biome(Player player) {
+        try {
+            String name = player.getLocation().getBlock().getBiome().name().toLowerCase(Locale.ROOT);
+            StringBuilder out = new StringBuilder();
+            for (String word : name.split("_")) {
+                if (word.isEmpty()) {
+                    continue;
+                }
+                if (out.length() > 0) {
+                    out.append(' ');
+                }
+                out.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+            }
+            return out.toString();
+        } catch (Throwable e) {
+            return "Unknown";
+        }
+    }
+
+    private static String dimension(Player player) {
+        switch (player.getWorld().getEnvironment()) {
+            case NETHER:
+                return "Nether";
+            case THE_END:
+                return "The End";
+            default:
+                return "Overworld";
+        }
+    }
+
     // ---- placeholder expansion ----
 
     private String expand(Player player, String text) {
         String s = text
+                .replace("%player%", player.getName())
                 .replace("%player_name%", player.getName())
                 .replace("%player_displayname%", ChatColor.stripColor(player.getDisplayName()))
                 .replace("%player_world%", player.getWorld().getName())
                 .replace("%player_x%", String.valueOf(player.getLocation().getBlockX()))
                 .replace("%player_y%", String.valueOf(player.getLocation().getBlockY()))
-                .replace("%player_z%", String.valueOf(player.getLocation().getBlockZ()));
-        if (plugin.getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            try {
-                Class<?> api = Class.forName("me.clip.placeholderapi.PlaceholderAPI");
-                Method method = api.getMethod("setPlaceholders", OfflinePlayer.class, String.class);
-                s = (String) method.invoke(null, player, s);
-            } catch (Throwable ignored) {
-                // PlaceholderAPI missing or incompatible: leave %placeholders% as they are
-            }
-        }
+                .replace("%player_z%", String.valueOf(player.getLocation().getBlockZ()))
+                .replace("%player_facing%", facing(player))
+                .replace("%player_biome%", biome(player))
+                .replace("%player_dimension%", dimension(player));
+        s = plugin.papi(player, s);
         return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', s));
     }
 
@@ -950,6 +1118,6 @@ public final class ChatPlaceholders {
 
     // Defuse @everyone / @here so item names and lore can never ping.
     private static String defuse(String text) {
-        return text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere");
+        return FluxerSRV.stripMassMentions(text);
     }
 }

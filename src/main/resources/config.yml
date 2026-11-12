@@ -1,118 +1,194 @@
-# ==============================================
-#  FluxerSRV
-# ==============================================
+# =============================================================================
+#  FluxerSRV configuration
+#  Reload with /fluxer reload (a changed bot token needs a full restart).
+# =============================================================================
+#
+#  Sections
+#    1. Connection          bot token and channels
+#    2. General             global switches
+#    3. Minecraft -> Fluxer message formats, embeds, icons, webhook, bot status
+#    4. Fluxer -> Minecraft in-game chat format, links, mentions
+#    5. InteractiveChat     [item] [inv] [ender], custom placeholders, text commands
+# =============================================================================
 
-# Bot token from Fluxer
-botToken: ""
 
-# Channel IDs
+# -----------------------------------------------------------------------------
+#  1. Connection
+# -----------------------------------------------------------------------------
+
+# Bot token from the Fluxer developer settings.
+botToken: "Bot Token_Here"
+
 channels:
+  # Chat bridge channel (chat, joins, deaths, advancements, commands).
   global: "000000000000000000"
+  # Console channel: server log is streamed here, and messages typed here run as commands.
   console: "000000000000000000"
 
-# General
-fluxer-global-only: false      # true = only chat starting with "!" goes to Fluxer
-announce-advancements: true    # post advancements, goals and challenges
 
-# Post chat through a webhook, so each message shows the player's name and avatar
+# -----------------------------------------------------------------------------
+#  2. General
+# -----------------------------------------------------------------------------
+
+# true = only in-game chat starting with "!" is sent to Fluxer.
+fluxer-global-only: false
+
+# Post advancements, goals and challenges.
+announce-advancements: true
+
+# Fill in PlaceholderAPI placeholders in every format and embed below.
+# Never applied to text that players type.
+placeholderapi: true
+
+
+# -----------------------------------------------------------------------------
+#  3. Minecraft -> Fluxer
+# -----------------------------------------------------------------------------
+
+# Message formats (Fluxer markdown).
+#   %player_name%    the player
+#   %message%        what the player typed (chat only)
+#   %death_message%  the vanilla death message (death only)
+#   %advancement%    advancement title (advancement, goal, challenge only)
+#   %description%    advancement description (advancement, goal, challenge only)
+# Any PlaceholderAPI placeholder works too (e.g. %vault_prefix%), except in %message%.
+formats:
+  chat:         "**%player_name%**: %message%"
+  join:         "**%player_name%** joined the server!"
+  quit:         "**%player_name%** left the server!"
+  death:        "%death_message%"
+  advancement:  "**%player_name%** has made the advancement **%advancement%**"
+  goal:         "**%player_name%** has reached the goal **%advancement%**"
+  challenge:    "**%player_name%** has completed the challenge **%advancement%**"
+  serverStart:  "# Server Started"
+  serverStop:   "# Server Stopped"
+
+# Server start/stop, join, quit, death and advancement posts are sent as embeds;
+# the formats above become the embed text.
+embeds:
+  # false = plain messages instead of embeds, everywhere.
+  enabled: true
+  # Side-bar colors as "#RRGGBB".
+  colors:
+    join:         "#57F287"
+    quit:         "#ED4245"
+    death:        "#2F3136"
+    advancement:  "#FEE75C"
+    goal:         "#3498DB"
+    challenge:    "#9B59B6"
+    serverStart:  "#57F287"
+    serverStop:   "#ED4245"
+    playerlist:   "#5865F2"
+    time:         "#F1C40F"
+
+# Inventory icons used by the [item], [inv] and [ender] embeds.
+# On first start (and whenever the Minecraft version changes) the plugin downloads the client jar
+# from Mojang and draws an icon for every item. Icons are packed into atlas sheets
+# (atlas_0.png, atlas_1.png, ... plus atlas.json) in plugins/FluxerSRV/icons/.
+# Delete that folder to regenerate them.
+icons:
+  enabled: true
+  # Empty = this server's version. Needs 1.13+; set a newer version for older servers.
+  minecraft-version: ""
+  # Icon size in pixels.
+  size: 128
+  # Size of each atlas sheet in pixels (512-4096). Smaller means more sheets.
+  atlas-size: 2048
+  # Optional public image URL used when no generated icon exists.
+  # %item% = material name (e.g. diamond_sword).
+  thumbnail-url: ""
+
+# Post chat through a webhook so each message shows the player's name and avatar.
+# The bot needs the Manage Webhooks permission, or set an existing webhook URL below.
 webhooks:
   enabled: false
+  # Existing webhook URL (optional). Empty = find or create one named "name" below.
   url: ""
   name: " "
+  # Name and avatar shown on each message. %player_name%, %player_uuid%.
   username-format: "%player_name%"
   avatar-url: "https://heads.discordsrv.com/%player_name%/helm/256"
+  # Message text. %player_name%, %message%.
   content-format: "%message%"
-  fallback-to-bot: true        # use the bot if the webhook fails
+  # Use the bot instead if the webhook fails.
+  fallback-to-bot: true
 
-# Player count shown as the bot's status
+# Player count shown as the bot's status.
 status:
   enabled: true
-  update-interval-seconds: 30
-  format: "%online%/%max% players online"   # %online%, %max%
-  presence: "online"       
+  # Minimum 15 (gateway rate limit).
+  update-interval-seconds: 45
+  # %online%, %max% and any server-wide PlaceholderAPI placeholder.
+  format: "%online%/%max% players online"
+  # online, idle, dnd or invisible.
+  presence: "online"
 
-# ==============================================
-#  Minecraft -> Fluxer
-# ==============================================
 
-# Placeholders: %player_name%, %message%, %death_message%, %advancement%, %description%
-formats:
-  chat: "**%player_name%**: %message%"
-  join: "**%player_name%** joined the server!"
-  quit: "**%player_name%** left the server!"
-  death: "☠️ %death_message%"
-  advancement: "🏆 **%player_name%** has made the advancement **%advancement%**"
-  goal: "🎯 **%player_name%** has reached the goal **%advancement%**"
-  challenge: "🏅 **%player_name%** has completed the challenge **%advancement%**"
-  serverStart: "# Server Started ✅"
-  serverStop: "# Server Stopped ❌"
+# -----------------------------------------------------------------------------
+#  4. Fluxer -> Minecraft
+# -----------------------------------------------------------------------------
 
-# Server start/stop, join, quit, death and advancement posts are sent as embeds (the formats above become the text).
-embeds:
-  # Master switch for all embeds. false = plain messages instead.
-  enabled: true
-  # Side-bar colors ("#RRGGBB")
-  colors:
-    join: "#57F287"
-    quit: "#ED4245"
-    advancement: "#FEE75C"
-    goal: "#3498DB"
-    challenge: "#9B59B6"
-    death: "#2F3136"
-    playerlist: "#5865F2"
-    time: "#F1C40F"
-    serverStart: "#57F287"
-    serverStop: "#ED4245"
-
-# ==============================================
-#  Fluxer -> Minecraft
-# ==============================================
-
-# Colors: &a, &l, ... and hex as &#RRGGBB
-# Placeholders: %username%, %display_name%, %nickname%, %message%
+# Colors: &a, &l, ... and hex as &#RRGGBB. Use \n to start a new chat line.
+#   %username%      account name
+#   %display_name%  global display name
+#   %nickname%      server nickname (falls back to display name, then username)
+#   %message%       the message
+# reply-format also accepts %reply_username%, %reply_display_name%, %reply_nickname%
+# and %reply_message% for the message being replied to.
 ingame:
-  format: "[&bFluxer&r] <%username%> %message%"
+  format:       "[&bFluxer&r] <%username%> %message%"
   reply-format: "[&bFluxer&r] <%username%> &7(reply)&r %message%"
+  # Characters of the replied-to message shown in %reply_message%.
   reply-preview-length: 50
-  allow-message-colors: true   # let Fluxer users use &-color codes
+  # Let Fluxer users use &-color codes in their messages.
+  allow-message-colors: true
 
-  # Links and attachments (false = show the full URL as plain text)
+  # Clickable links and attachments. false = show the full URL as plain text.
   clickable-links: true
   clickable-media: true
-  # What clickable links and attachments display (%name% = file name, link text or short URL)
+  # What they display. %name% = file name, link text or shortened URL.
   media-placeholder: "&b&n%name%&r"
-  file-placeholder: "&b&n%name%&r"
-  link-placeholder: "&b&n%name%&r"
-  link-max-length: 40          # longer plain links are cut with "..."
+  file-placeholder:  "&b&n%name%&r"
+  link-placeholder:  "&b&n%name%&r"
+  # Plain links longer than this are cut with "...".
+  link-max-length: 40
 
   mentions:
-    user-format: "&b@%name%"
-    role-format: "&b@%name%"
+    user-format:    "&b@%name%"
+    role-format:    "&b@%name%"
     channel-format: "&b#%name%"
-    name-source: "nickname"    # username, display_name or nickname
-                 # online, idle, dnd or invisible
+    # Name used for user mentions: username, display_name or nickname.
+    name-source: "nickname"
 
-# ==============================================
-#  InteractiveChat
-# ==============================================
+
+# -----------------------------------------------------------------------------
+#  5. InteractiveChat
+# -----------------------------------------------------------------------------
+# Players can share items, inventories and more with keywords in chat. They are sent
+# to Fluxer as embeds (or an inline tag plus a code block when an embed is off).
+# InteractiveChat's interactivechat.module.* permissions are respected when it is installed.
 
 interactivechat:
   enabled: true
-  max-details-length: 1900     # max characters per details block
+  # Maximum characters in a details block.
+  max-details-length: 1900
 
-  # [item]  (%item% = name and amount, %player%)
+  # [item] - the item in the player's hand. %item% = name and amount, %player%.
   item:
     enabled: true
     keyword: "[item]"
     inline: "`[%item%]`"
-    empty-inline: "`[Nothing]`"     # when the player holds nothing
-    # Show as an embed instead of an inline tag + code block
+    # Shown when the player holds nothing.
+    empty-inline: "`[Nothing]`"
     embed:
       enabled: true
       color: "#3498DB"
-      title: "%player%'s Item"      # %player%, %item%
+      title: "%player%'s Item"
+      # The item's generated icon (see "icons" above) as the embed thumbnail.
+      # Also the thumbnail for [ender] and shared shulker boxes.
+      thumbnail: true
 
-  # [inv]
+  # [inv] - the player's inventory, drawn as the inventory screen.
   inventory:
     enabled: true
     keyword: "[inv]"
@@ -121,8 +197,17 @@ interactivechat:
       enabled: true
       color: "#5865F2"
       title: "%player%'s Inventory"
+      image:
+        # Needs the item icons (see "icons" above).
+        enabled: true
+        # Picture size: 1 = 176x166 pixels, 3 = 528x498, ...
+        scale: 3
+        # Also list the items as text under the picture.
+        show-text: false
+        # Picture for the player slot. %player% = the player who typed [inv]. Empty = leave it empty.
+        player-url: "https://heads.discordsrv.com/%player%/player"
 
-  # [ender]
+  # [ender] - the player's ender chest.
   enderchest:
     enabled: true
     keyword: "[ender]"
@@ -131,22 +216,52 @@ interactivechat:
       enabled: true
       color: "#8E44AD"
       title: "%player%'s Ender Chest"
+      image:
+        enabled: true
+        # 1 = 176x77 pixels, 3 = 528x231, ...
+        scale: 3
+        show-text: false
 
-  # Contents of a shulker box shared with [item]
+  # Contents of a shulker box shared with [item].
   shulker:
     embed:
       enabled: true
       color: "#CB4DCB"
-      title: "%player%'s %item%"    # %item% = the box's name
+      # %item% = the box's name.
+      title: "%player%'s %item%"
+      image:
+        enabled: true
+        scale: 3
+        show-text: false
 
-  # Your own placeholders (any PlaceholderAPI or %player_*% value)
+  # Your own placeholders. Any PlaceholderAPI placeholder works in replace, title and body.
+  # Extra built-ins: %player_world%, %player_x%, %player_y%, %player_z%, %player_facing%,
+  # %player_biome%, %player_dimension%.
+  # Add an "embed" section to show the placeholder as an embed instead of inline text.
   custom:
     - keyword: "[pos]"
+      # Used when the embed is off.
       replace: "`[%player_world%: %player_x% %player_y% %player_z%]`"
+      embed:
+        enabled: true
+        color: "#2ECC71"
+        title: "%player%'s Position"
+        body:
+          - "**World:** %player_world% (%player_dimension%)"
+          - "**Coordinates:** %player_x%, %player_y%, %player_z%"
+          - "**Facing:** %player_facing%"
+          - "**Biome:** %player_biome%"
 
-  # Text commands in the global channel:
-  # <prefix>playerlist, <prefix>time, <prefix>item|inv|ender <player>
+  # Text commands typed in the global channel:
+  #   <prefix>playerlist, <prefix>time, <prefix>item|inv|ender <player>
   commands:
     enabled: true
     prefix: "mc!"
-    time-world: "world"             # world for <prefix>time (empty = main world)
+    # World used by <prefix>time. Empty = the main world.
+    time-world: ""
+    # <prefix>playerlist. PlaceholderAPI works; entries are filled in per player.
+    playerlist-title: "## Players Online (%online%/%max%)"
+    playerlist-entry: "- %player_name%"
+    playerlist-empty: "*Nobody is online*"
+    # <prefix>time. %time%, %phase%, %day%, %world%.
+    time-format: "## In-Game Time\n**%time%** - %phase%\nDay %day% | %world%"

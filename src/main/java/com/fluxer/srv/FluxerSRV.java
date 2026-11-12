@@ -1,19 +1,42 @@
 package com.fluxer.srv;
 
+import com.fluxer.srv.listeners.AdvancementHook;
+import com.fluxer.srv.listeners.AdvancementListener;
+import com.fluxer.srv.listeners.ChatListener;
+import com.fluxer.srv.listeners.DeathListener;
+import com.fluxer.srv.listeners.FluxerMessageListener;
+import com.fluxer.srv.listeners.JoinQuitListener;
+import com.fluxer.srv.logging.FluxerConsoleAppender;
+import com.google.gson.JsonObject;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Logger;
 import org.bukkit.ChatColor;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.imageio.ImageIO;
 
 public class FluxerSRV extends JavaPlugin {
 
@@ -25,6 +48,8 @@ public class FluxerSRV extends JavaPlugin {
     // guildId -> cached role names (for rendering <@&id> role mentions)
     private final Map<String, CachedRoles> roleCache = new ConcurrentHashMap<>();
     private ChatPlaceholders chatPlaceholders;
+    private ItemIcons itemIcons;
+    private final AtomicInteger inventoryPictures = new AtomicInteger();
 
     private static final class CachedRoles {
         final Map<String, String> names;
@@ -38,15 +63,16 @@ public class FluxerSRV extends JavaPlugin {
     private volatile String consoleChannelId;
     private String activeToken;
 
+    private static final String UNSET_CHANNEL = "000000000000000000";
     private static final Pattern HEX_COLOR = Pattern.compile("&#([0-9a-fA-F]{6})");
 
     // Set once the chat webhook is ready (null = not ready / webhooks disabled)
     private volatile FluxerRestApi.Webhook chatWebhook;
 
-    private com.fluxer.srv.logging.FluxerConsoleAppender consoleAppender;
+    private FluxerConsoleAppender consoleAppender;
 
     // Live player-count status
-    private org.bukkit.scheduler.BukkitTask statusTask;
+    private BukkitTask statusTask;
     private String lastStatusText;
 
     @Override
@@ -67,32 +93,34 @@ public class FluxerSRV extends JavaPlugin {
         httpClient = new OkHttpClient();
         fluxerClient = new FluxerClient(token, getLogger(), httpClient);
         chatPlaceholders = new ChatPlaceholders(this);
+        itemIcons = new ItemIcons(this);
+        itemIcons.generateAsync(); // inventory icons for [item], made once per Minecraft version
         if (getServer().getPluginManager().getPlugin("InteractiveChat") != null) {
             getLogger().info("InteractiveChat detected: [item], [inv], [ender] and custom placeholders "
                     + "are sent to Fluxer as text (see interactivechat: in config.yml).");
         }
 
         // Register listeners and command executors
-        getServer().getPluginManager().registerEvents(new com.fluxer.srv.listeners.ChatListener(this), this);
-        getServer().getPluginManager().registerEvents(new com.fluxer.srv.listeners.JoinQuitListener(this), this);
-        getServer().getPluginManager().registerEvents(new com.fluxer.srv.listeners.DeathListener(this), this);
+        getServer().getPluginManager().registerEvents(new ChatListener(this), this);
+        getServer().getPluginManager().registerEvents(new JoinQuitListener(this), this);
+        getServer().getPluginManager().registerEvents(new DeathListener(this), this);
         // Advancements: PlayerAdvancementDoneEvent on 1.12+, the old achievement event on 1.8-1.11
-        if (!com.fluxer.srv.listeners.AdvancementHook.register(this)) {
+        if (!AdvancementHook.register(this)) {
             try {
                 Class.forName("org.bukkit.event.player.PlayerAchievementAwardedEvent");
                 getServer().getPluginManager().registerEvents(
-                        new com.fluxer.srv.listeners.AdvancementListener(this), this);
+                        new AdvancementListener(this), this);
             } catch (ClassNotFoundException e) {
                 getLogger().warning("No advancement event found on this server; advancements won't be sent to Fluxer.");
             }
         }
 
         try {
-            fluxerClient.setListener(new com.fluxer.srv.listeners.FluxerMessageListener(this));
+            fluxerClient.setListener(new FluxerMessageListener(this));
             fluxerClient.connect();
-            if (mainChannelId != null && !mainChannelId.isEmpty() && !mainChannelId.equals("000000000000000000")) {
+            if (hasMainChannel()) {
                 EventEmbeds.send(this, mainChannelId,
-                        getConfig().getString("formats.serverStart", "# Server Started \u2705"),
+                        papi(null, getConfig().getString("formats.serverStart", "# Server Started")),
                         "serverStart", 0x57F287);
             }
         } catch (Exception e) {
@@ -108,9 +136,9 @@ public class FluxerSRV extends JavaPlugin {
 
         // Setup Console Appender
         try {
-            org.apache.logging.log4j.core.Logger coreLogger = (org.apache.logging.log4j.core.Logger) org.apache.logging.log4j.LogManager
+            Logger coreLogger = (Logger) LogManager
                     .getRootLogger();
-            consoleAppender = new com.fluxer.srv.logging.FluxerConsoleAppender(this);
+            consoleAppender = new FluxerConsoleAppender(this);
             consoleAppender.start();
             coreLogger.addAppender(consoleAppender);
             consoleAppender.startTask();
@@ -127,7 +155,7 @@ public class FluxerSRV extends JavaPlugin {
             consoleAppender.stopTask();
             consoleAppender.stop();
             try {
-                org.apache.logging.log4j.core.Logger coreLogger = (org.apache.logging.log4j.core.Logger) org.apache.logging.log4j.LogManager
+                Logger coreLogger = (Logger) LogManager
                         .getRootLogger();
                 coreLogger.removeAppender(consoleAppender);
             } catch (Exception ignored) {
@@ -135,10 +163,10 @@ public class FluxerSRV extends JavaPlugin {
         }
 
         if (fluxerClient != null) {
-            if (mainChannelId != null && !mainChannelId.isEmpty() && !mainChannelId.equals("000000000000000000")) {
+            if (hasMainChannel()) {
                 try {
                     EventEmbeds.send(this, mainChannelId,
-                            getConfig().getString("formats.serverStop", "# Server Stopped \u274C"),
+                            papi(null, getConfig().getString("formats.serverStop", "# Server Stopped")),
                             "serverStop", 0xED4245);
                 } catch (IOException e) {
                     getLogger().warning("Failed to send server stop message: " + e.getMessage());
@@ -158,7 +186,7 @@ public class FluxerSRV extends JavaPlugin {
         if (!getConfig().getBoolean("webhooks.enabled", false)) {
             return;
         }
-        if (mainChannelId == null || mainChannelId.isEmpty() || mainChannelId.equals("000000000000000000")) {
+        if (!hasMainChannel()) {
             getLogger().warning("Webhooks are enabled but channels.global is not set; webhooks disabled.");
             return;
         }
@@ -180,7 +208,7 @@ public class FluxerSRV extends JavaPlugin {
             return;
         }
 
-        int seconds = getConfig().getInt("status.update-interval-seconds", 30);
+        int seconds = getConfig().getInt("status.update-interval-seconds", 45);
         if (seconds < MIN_STATUS_INTERVAL) {
             getLogger().warning("status.update-interval-seconds is below " + MIN_STATUS_INTERVAL
                     + "; using " + MIN_STATUS_INTERVAL + " to stay inside the gateway rate limit.");
@@ -197,12 +225,77 @@ public class FluxerSRV extends JavaPlugin {
         }, 0L, ticks);
     }
 
+    // ---- PlaceholderAPI ----
+
+    private volatile Method papiMethod;
+
+    /**
+     * Fills in PlaceholderAPI placeholders (%vault_prefix%, %server_tps%, ...) for a player, or server-wide
+     * ones when player is null. Returns the text unchanged if PlaceholderAPI is missing or switched off
+     * (placeholderapi: false). Safe from any thread. Never run this on text a player typed.
+     */
+    public String papi(OfflinePlayer player, String text) {
+        if (text == null || text.indexOf('%') < 0 || !getConfig().getBoolean("placeholderapi", true)
+                || !getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            return text;
+        }
+        final String prepared = builtinLocale(player, text);
+        if (prepared.indexOf('%') < 0) {
+            return prepared;
+        }
+        try {
+            if (getServer().isPrimaryThread()) {
+                return papiNow(player, prepared);
+            }
+            return getServer().getScheduler().callSyncMethod(this, () -> papiNow(player, prepared))
+                    .get(2, TimeUnit.SECONDS);
+        } catch (Throwable ignored) {
+            return prepared; // PlaceholderAPI missing, incompatible or too slow: keep the %placeholders% as they are
+        }
+    }
+
+    /**
+     * %player_locale% is answered here instead of by PlaceholderAPI: the Player expansion looks the locale
+     * up through obsolete NMS field names and prints a long NoSuchFieldException on new Minecraft versions.
+     */
+    private String builtinLocale(OfflinePlayer player, String text) {
+        if (!text.contains("%player_locale%")) {
+            return text;
+        }
+        String locale = "unknown";
+        Player online = player == null ? null : player.getPlayer();
+        if (online != null) {
+            for (String name : new String[]{"locale", "getLocale"}) {
+                try {
+                    Object value = online.getClass().getMethod(name).invoke(online);
+                    if (value != null) {
+                        locale = value.toString();
+                        break;
+                    }
+                } catch (Throwable ignored) {
+                    // try the next method name
+                }
+            }
+        }
+        return text.replace("%player_locale%", locale);
+    }
+
+    private String papiNow(OfflinePlayer player, String text) throws Exception {
+        Method method = papiMethod;
+        if (method == null) {
+            method = Class.forName("me.clip.placeholderapi.PlaceholderAPI")
+                    .getMethod("setPlaceholders", OfflinePlayer.class, String.class);
+            papiMethod = method;
+        }
+        return (String) method.invoke(null, player, text);
+    }
+
     private static final int MIN_STATUS_INTERVAL = 15;
 
     private void refreshStatus() {
         int online = getServer().getOnlinePlayers().size();
         int max = getServer().getMaxPlayers();
-        String text = getConfig().getString("status.format", "%online%/%max% players online")
+        String text = papi(null, getConfig().getString("status.format", "%online%/%max% players online"))
                 .replace("%online%", String.valueOf(online))
                 .replace("%max%", String.valueOf(max));
 
@@ -334,14 +427,6 @@ public class FluxerSRV extends JavaPlugin {
         return hook != null && hook.id.equals(webhookId);
     }
 
-    /**
-     * Sends a player's chat line to the global channel, via the webhook (own name + avatar)
-     * when enabled, otherwise through the bot using botMessage. Call from an async thread.
-     */
-    public void sendPlayerChat(String playerName, String playerUuid, String rawMessage, String botMessage) {
-        sendPlayerChat(playerName, playerUuid, rawMessage, botMessage, null);
-    }
-
     /** The player's head icon: the same URL (webhooks.avatar-url) the webhook uses as their avatar. */
     public String playerAvatarUrl(String playerName, String playerUuid) {
         return getConfig()
@@ -350,36 +435,143 @@ public class FluxerSRV extends JavaPlugin {
                 .replace("%player_uuid%", playerUuid);
     }
 
-    /** Embeds with just the title as the author line: no player icon. */
-    public java.util.List<com.google.gson.JsonObject> buildEmbeds(String playerName, String playerUuid,
-                                                                  java.util.List<ChatPlaceholders.Embed> embeds) {
-        java.util.List<com.google.gson.JsonObject> out = new java.util.ArrayList<>();
+    public OkHttpClient getHttpClient() {
+        return httpClient;
+    }
+
+    /**
+     * The picture of a player for the [inv] picture's player slot, downloaded from
+     * interactivechat.inventory.embed.image.player-url (%player% = the player who typed [inv]; default
+     * https://heads.discordsrv.com/%player%/player). Null if it is switched off or cannot be fetched, which leaves
+     * the slot empty. Blocking: call from an async thread.
+     */
+    private BufferedImage fetchPlayerPicture(String playerName) {
+        if (playerName == null || playerName.isEmpty()) {
+            return null;
+        }
+        String template = getConfig().getString("interactivechat.inventory.embed.image.player-url",
+                "https://heads.discordsrv.com/%player%/player");
+        if (template == null || template.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            String url = template.trim().replace("%player%", URLEncoder.encode(playerName, "UTF-8"));
+            OkHttpClient client = httpClient.newBuilder()
+                    .callTimeout(8, TimeUnit.SECONDS).build();
+            Request request = new Request.Builder().url(url).header("User-Agent", "FluxerSRV").build();
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    getLogger().warning("Could not get the player picture for [inv] from " + url + " (HTTP "
+                            + response.code() + "); the player slot is left empty.");
+                    return null;
+                }
+                return ImageIO.read(new ByteArrayInputStream(response.body().bytes()));
+            }
+        } catch (Exception e) {
+            getLogger().warning("Could not get the player picture for [inv]: " + e + "; the player slot is left empty.");
+            return null;
+        }
+    }
+
+    /** Adds an uploaded picture to the message and points the embed's image/thumbnail slot at it. */
+    private static void attachPicture(JsonObject embed, String slot, List<FluxerRestApi.Attachment> files,
+                                      String name, byte[] png) {
+        for (FluxerRestApi.Attachment existing : files) {
+            if (existing.filename.equals(name)) {
+                png = null;
+                break;
+            }
+        }
+        if (png != null) {
+            files.add(new FluxerRestApi.Attachment(name, png));
+        }
+        JsonObject holder = new JsonObject();
+        holder.addProperty("url", "attachment://" + name);
+        embed.add(slot, holder);
+    }
+
+    /**
+     * Builds the embed JSON for the given embeds. Pictures the embeds refer to (attachment://name.png)
+     * are added to {@code files}.
+     */
+    public List<JsonObject> buildEmbeds(List<ChatPlaceholders.Embed> embeds, List<FluxerRestApi.Attachment> files) {
+        List<JsonObject> out = new ArrayList<>();
         for (ChatPlaceholders.Embed embed : embeds) {
-            out.add(FluxerRestApi.authorEmbed(embed.title, null, embed.body, embed.color));
+            JsonObject json = FluxerRestApi.authorEmbed(embed.title, null, embed.body, embed.color);
+            // [inv]: a picture of the inventory screen with the player's items in it
+            if (embed.slots != null) {
+                int scale = Math.max(1, Math.min(6, getConfig().getInt("interactivechat.inventory.embed.image.scale", 3)));
+                byte[] picture = InventoryImage.render(itemIcons, embed.slots, fetchPlayerPicture(embed.playerName),
+                        scale, getLogger());
+                if (picture != null) {
+                    attachPicture(json, "image", files, "inventory-" + inventoryPictures.incrementAndGet() + ".png", picture);
+                    if (!getConfig().getBoolean("interactivechat.inventory.embed.image.show-text", false)) {
+                        json.remove("description");
+                    }
+                }
+            }
+            // [ender] / shulker box: a picture of the container screen with its contents in it
+            if (embed.containerSlots != null && embed.containerSection != null) {
+                String key = "interactivechat." + embed.containerSection + ".embed.image.";
+                int scale = Math.max(1, Math.min(6, getConfig().getInt(key + "scale", 3)));
+                byte[] picture = InventoryImage.renderContainer(itemIcons, embed.containerSlots,
+                        embed.containerTexture, scale, getLogger());
+                if (picture != null) {
+                    attachPicture(json, "image", files,
+                            embed.containerSection + "-" + inventoryPictures.incrementAndGet() + ".png", picture);
+                    if (!getConfig().getBoolean(key + "show-text", false)) {
+                        json.remove("description");
+                    }
+                }
+            }
+            // [item]: the item's generated inventory icon as the thumbnail
+            if (embed.material != null && getConfig().getBoolean("interactivechat.item.embed.thumbnail", true)) {
+                byte[] icon = itemIcons != null ? itemIcons.iconPng(embed.material) : null;
+                String template = getConfig().getString("icons.thumbnail-url", "");
+                if (icon != null) {
+                    attachPicture(json, "thumbnail", files, embed.material + ".png", icon);
+                } else if (template != null && !template.trim().isEmpty()) {
+                    // No generated icon: use a public image URL instead (icons.thumbnail-url)
+                    JsonObject holder = new JsonObject();
+                    holder.addProperty("url", template.replace("%item%", embed.material));
+                    json.add("thumbnail", holder);
+                } else {
+                    getLogger().warning("No thumbnail for [item] '" + embed.material + "': it is not in the "
+                            + "icon atlases (plugins/FluxerSRV/icons/atlas_*.png). Check the console for "
+                            + "'Item icons ready' or 'Could not generate item icons'.");
+                }
+            }
+            out.add(json);
         }
         return out;
     }
 
-    /** As above; the embeds (if any) are posted in the same message. */
+    /**
+     * Sends a player's chat line to the global channel, via the webhook (own name + avatar) when enabled,
+     * otherwise through the bot using botMessage. Any embeds are posted in the same message.
+     * Call from an async thread.
+     */
     public void sendPlayerChat(String playerName, String playerUuid, String rawMessage, String botMessage,
-                               java.util.List<ChatPlaceholders.Embed> embedList) {
+                               List<ChatPlaceholders.Embed> embedList) {
         FluxerRestApi api = fluxerClient.getRestApi();
-        java.util.List<com.google.gson.JsonObject> embeds = embedList == null || embedList.isEmpty()
-                ? null : buildEmbeds(playerName, playerUuid, embedList);
+        List<FluxerRestApi.Attachment> files = new ArrayList<>();
+        List<JsonObject> embeds = embedList == null || embedList.isEmpty()
+                ? null : buildEmbeds(embedList, files);
         boolean fallback = getConfig().getBoolean("webhooks.fallback-to-bot", true);
 
         if (getConfig().getBoolean("webhooks.enabled", false)) {
             FluxerRestApi.Webhook hook = chatWebhook;
             if (hook != null) {
                 try {
-                    String username = getConfig().getString("webhooks.username-format", "%player_name%")
+                    OfflinePlayer papiPlayer = papiPlayer(playerName, playerUuid);
+                    String username = papi(papiPlayer, getConfig().getString("webhooks.username-format", "%player_name%")
                             .replace("%player_name%", playerName)
-                            .replace("%player_uuid%", playerUuid);
+                            .replace("%player_uuid%", playerUuid));
                     String avatar = playerAvatarUrl(playerName, playerUuid);
-                    String content = getConfig().getString("webhooks.content-format", "%message%")
-                            .replace("%player_name%", playerName)
+                    String content = papi(papiPlayer, getConfig().getString("webhooks.content-format", "%message%")
+                            .replace("%player_name%", playerName))
                             .replace("%message%", stripMassMentions(rawMessage));
-                    api.executeWebhook(hook, content, username, avatar, embeds);
+                    api.executeWebhook(hook, content, username, avatar, embeds, files);
                     return;
                 } catch (Exception e) {
                     getLogger().warning("Failed to send chat via webhook: " + e.getMessage());
@@ -392,7 +584,7 @@ public class FluxerSRV extends JavaPlugin {
 
         try {
             if (embeds != null) {
-                api.sendMessage(mainChannelId, botMessage, embeds);
+                api.sendMessage(mainChannelId, botMessage, embeds, files);
             } else {
                 api.sendMessage(mainChannelId, botMessage);
             }
@@ -401,8 +593,16 @@ public class FluxerSRV extends JavaPlugin {
         }
     }
 
-    // Webhook messages can ping, so defuse @everyone / @here coming from players.
-    private static String stripMassMentions(String text) {
+    private OfflinePlayer papiPlayer(String playerName, String playerUuid) {
+        try {
+            return getServer().getOfflinePlayer(UUID.fromString(playerUuid));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Defuses @everyone / @here so text from players, item names and lore can never ping. */
+    public static String stripMassMentions(String text) {
         return text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere");
     }
 
@@ -420,5 +620,18 @@ public class FluxerSRV extends JavaPlugin {
 
     public String getConsoleChannelId() {
         return consoleChannelId;
+    }
+
+    /** True if the id is a real channel id (not empty and not the "000..." placeholder from the default config). */
+    public static boolean isChannelSet(String channelId) {
+        return channelId != null && !channelId.isEmpty() && !channelId.equals(UNSET_CHANNEL);
+    }
+
+    public boolean hasMainChannel() {
+        return isChannelSet(mainChannelId);
+    }
+
+    public boolean hasConsoleChannel() {
+        return isChannelSet(consoleChannelId);
     }
 }

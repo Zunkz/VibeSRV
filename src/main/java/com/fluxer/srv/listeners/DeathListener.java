@@ -17,18 +17,18 @@ public class DeathListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerDeath(PlayerDeathEvent event) {
-        String mainChannelId = plugin.getMainChannelId();
-        if (mainChannelId == null || mainChannelId.isEmpty() || mainChannelId.equals("000000000000000000")) {
+        if (!plugin.hasMainChannel()) {
             return;
         }
+        String mainChannelId = plugin.getMainChannelId();
 
         String deathMessage = event.getDeathMessage();
         if (deathMessage == null || deathMessage.isEmpty()) {
             return;
         }
 
-        String format = plugin.getConfig().getString("formats.death", "\u2620\uFE0F %death_message%");
-        String message = format.replace("%death_message%", deathMessage);
+        String format = plugin.getConfig().getString("formats.death", "%death_message%");
+        String message = plugin.papi(event.getEntity(), format).replace("%death_message%", deathMessage);
 
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {

@@ -14,6 +14,7 @@ public class FluxerConsoleAppender extends AbstractAppender {
 
     private final FluxerSRV plugin;
     private final Queue<String> messageQueue = new ConcurrentLinkedQueue<>();
+    private static final java.util.regex.Pattern ANSI = java.util.regex.Pattern.compile("\u001B\\[[;\\d]*m");
     private int taskId = -1;
 
     public FluxerConsoleAppender(FluxerSRV plugin) {
@@ -68,14 +69,14 @@ public class FluxerConsoleAppender extends AbstractAppender {
 
     @Override
     public void append(LogEvent event) {
+        if (!plugin.hasConsoleChannel()) {
+            return; // nothing to forward to, so don't queue anything
+        }
         String message = event.getMessage().getFormattedMessage();
         if (event.getThrown() != null) {
             message += "\n" + event.getThrown().getMessage();
         }
-
-        // Strip ANSI color codes
-        message = message.replaceAll("\u001B\\[[;\\d]*m", "");
-        messageQueue.add(message);
+        messageQueue.add(ANSI.matcher(message).replaceAll(""));
     }
 
     public void startTask() {
@@ -86,12 +87,11 @@ public class FluxerConsoleAppender extends AbstractAppender {
             if (messageQueue.isEmpty())
                 return;
 
-            String consoleChannelId = plugin.getConsoleChannelId();
-            if (consoleChannelId == null || consoleChannelId.isEmpty()
-                    || consoleChannelId.equals("000000000000000000")) {
+            if (!plugin.hasConsoleChannel()) {
                 messageQueue.clear();
                 return;
             }
+            final String consoleChannelId = plugin.getConsoleChannelId();
 
             StringBuilder sb = new StringBuilder("```\n");
             int count = 0;
@@ -103,13 +103,13 @@ public class FluxerConsoleAppender extends AbstractAppender {
 
             final String payload = sb.toString();
 
-            new Thread(() -> {
+            plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                 try {
                     plugin.getFluxerClient().getRestApi().sendMessage(consoleChannelId, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("Failed to send console logs to Fluxer: " + e.getMessage());
                 }
-            }).start();
+            });
 
         }, 20L * 5, 20L * 5); // Run every 5 seconds
     }
